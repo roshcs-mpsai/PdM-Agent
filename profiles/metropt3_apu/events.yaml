@@ -1,0 +1,99 @@
+# events.yaml -- v0.1 (2026-09-20, Rosh)
+# Failure windows, timeline zones and label policy for MetroPT-3 (2020 campaign).
+# PR-03: windows and healthy-period selection live here, not in code.
+# v0.1: zones + three padding types from the Week 6 training-data design;
+#       event verification resolved against UCI (all four are air leaks).
+#
+# Sources:
+#   dates + maintenance days : UCI ML Repository, dataset 791 (verified 2026-09-19)
+#   hour-level times         : Davari et al. failure table as circulated in the
+#                              MetroPT literature -- CONFIRM against the paper copy
+# Reports record DETECTION, not onset, and failure 1 spans exactly one calendar
+# day, so labels are day-granular. The paddings below reflect that.
+
+asset: metropt3_apu
+campaign: [2020-02-01, 2020-09-01]
+label_granularity: day
+
+# Three distinct paddings, tuned independently (Week 6 design):
+guard_band:            # label uncertainty around every reported window
+  before: 24h          # PROPOSAL -- argue with it at the sync
+  after: 12h
+healthy_buffer:        # protects training data; defines the grey zone
+  before_failure: 7d
+  after_repair: 48h
+lead_horizons: [2h, 24h, 72h]   # detection evaluated at each; no single window
+
+# Timeline zones (every timestamp gets exactly one label):
+#   positive  = lead window + failure interval, guard-banded
+#   negative  = outside all buffers (the only detector training data)
+#   grey      = healthy buffers, repair windows, gap edges, uncertain_periods
+#   censored  = end of campaign + gap-interrupted intervals (survival model only)
+
+failures:
+  - id: F1
+    type: air_leak
+    start: 2020-04-18 00:00
+    end:   2020-04-18 23:59
+    maintenance: null          # none listed on UCI
+    notes: "UCI: air leak, high stress. Window is exactly one calendar day."
+  - id: F2
+    type: air_leak
+    start: 2020-05-29 23:30
+    end:   2020-05-30 06:00
+    maintenance: 2020-05-30
+    notes: "COMP cycling spike ~1,400/day on May 27-28 precedes this window."
+  - id: F3
+    type: air_leak
+    start: 2020-06-05 10:00
+    end:   2020-06-07 14:30
+    maintenance: 2020-06-08
+    paired_with: F2   # 6 days after F2: buffers overlap, no confirmed-negative
+                      # between them; folds use asymmetric test blocks and
+                      # F2/F3 results are reported as a paired case
+    notes: "Recording gap Jun 7 14:19 -> Jun 8 11:48 follows (repair downtime)."
+  - id: F4
+    type: air_leak
+    start: 2020-07-15 14:30
+    end:   2020-07-15 19:00
+    maintenance: 2020-07-16
+    notes: "Oil_temperature reaches ~89 degC, the dataset maximum."
+
+# Anomalous periods with NO matching failure report (EDA Sections 4-5).
+# Policy (proposed): excluded from healthy-data selection; false-alarm rate is
+# reported both with and without these periods; alarms inside them are audited
+# manually rather than counted as false.
+# Dates read off the daily charts -- confirm exact days from the executed
+# notebook before freezing.
+uncertain_periods:
+  - {start: 2020-04-25, end: 2020-04-27, reason: "LPS active ~4 h/day, then a 2-day recording gap; one week after F1"}
+  - {start: 2020-05-02, end: 2020-05-08, reason: "repeated heavy LPS activations (~2-3.9 h/day), no report"}
+  - {start: 2020-06-12, end: 2020-06-14, reason: "COMP cycling spike ~800/day, no report"}
+  - {start: 2020-06-30, end: 2020-07-02, reason: "LPS active ~3.5 h/day, no report -- CONFLICTS with healthy span H1 below"}
+  - {start: 2020-07-24, end: 2020-07-26, reason: "COMP cycling spike ~500/day, no report"}
+
+# Verification note (2026-09-19, UCI page): all four 2020 events are air leaks
+# under high stress. The oil leak sometimes attributed to this dataset belongs
+# to the 2022 campaign -- which also means the transfer test faces failure
+# types unseen in 2020 (oil leak, client-side leak); expect and report degradation.
+
+# Healthy-period candidates (>= 90% daily coverage, computed with a 2-day
+# failure buffer -- RECOMPUTE under the 7-day healthy_buffer above; spans will
+# shrink). Day-level view; window-level selection supersedes this in the pipeline.
+# KNOWN CONFLICTS to resolve at the sync:
+#   H1 contains an LPS-heavy day (~Jul 1) -- split or drop that day.
+#   H3 overlaps the Jun 12-14 uncertain period -- probably drop.
+healthy_candidates:
+  - {id: H1, start: 2020-06-29, end: 2020-07-05, days: 7, conflict: "uncertain Jun 30 - Jul 2"}
+  - {id: H2, start: 2020-07-18, end: 2020-07-22, days: 5}
+  - {id: H3, start: 2020-06-13, end: 2020-06-16, days: 4, conflict: "uncertain Jun 12-14"}
+  - {id: H4, start: 2020-03-21, end: 2020-03-23, days: 3}
+  - {id: H5, start: 2020-05-06, end: 2020-05-08, days: 3, conflict: "uncertain May 2-8"}
+  - {id: H6, start: 2020-03-25, end: 2020-03-27, days: 3}
+  - {id: H7, start: 2020-08-06, end: 2020-08-08, days: 3}
+
+# Operating regimes (EDA Section 3). Fit and evaluate per regime (ESR-04);
+# never fit the detector on light_duty alone.
+regimes:
+  - {name: light_duty, start: 2020-02-01, end: 2020-02-28, notes: "low duty, LPS silent; shift occurs across the Feb 28 - Mar 1 gap"}
+  - {name: normal,     start: 2020-03-01, end: 2020-09-01}

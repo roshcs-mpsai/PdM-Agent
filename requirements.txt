@@ -1,0 +1,9 @@
+# R0/R1 core. Heavier dependencies (torch, scikit-survival, langgraph, mlflow)
+# are added by the service that needs them, when it lands.
+pandas>=2.0
+numpy
+matplotlib
+pyyaml
+pydantic>=2
+paho-mqtt>=2
+pytest

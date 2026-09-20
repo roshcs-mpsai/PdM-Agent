@@ -1,0 +1,16 @@
+# Walking skeleton — R0. Services are added here as they come up:
+# replayer -> ingest/scorer -> dashboard (see the construction plan).
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: pdm-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-W", "3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
