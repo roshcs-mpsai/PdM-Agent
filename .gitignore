@@ -13,6 +13,10 @@ mlruns/
 .pytest_cache/
 .DS_Store
 
+# runtime output: quarantine, replay logs, fitted Version Zero models
+runs/
+models/
+
 # pip install -e lib
 *.egg-info/
 build/
