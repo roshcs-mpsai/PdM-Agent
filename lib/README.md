@@ -17,6 +17,7 @@ pip install -e lib     # once per environment; CI does the same
 | `timeutil` | `to_utc()`, `iso_utc()`, `parse_duration()` | ING-09 |
 | `windows` | `MinuteWindower`: one-minute means, shared by the ingest stub and the R0 z-score fit (replaced in R1a.5) | ING-11 stub |
 | `mqtt` | `run_service()`: subscribe, handle, publish at QoS 1, flush on shutdown; `read_retained()` | — |
+| `status` | NE 107 states, `r0_status()`, dashboard `marker()` colours | INC-07 stub |
 
 Two rules:
 
