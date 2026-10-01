@@ -31,6 +31,8 @@ and is not loaded before the Week 7 model freeze.
 ```
 profiles/metropt3_apu/   asset_profile.yaml + events.yaml — every asset-specific
                          fact lives here; shared code contains no MetroPT names
+lib/pdm_common/          shared library: profile and events loading, hashing,
+                         time helpers -- every service imports it
 services/                one directory per component (replayer, ingest, detector,
                          prognostics, gate, mcp_server, agent, dashboard,
                          opcua_north, connector)
@@ -45,6 +47,7 @@ tests/                   unit, schema, negative and injection tests (CI-gated)
 
 ```bash
 pip install -r requirements.txt
+pip install -e lib                 # pdm_common, the shared library
 pytest -q                          # profile/config invariants
 python eval/evaluate.py            # harness Version Zero (prints fold plan)
 docker compose up -d               # Mosquitto broker (walking skeleton)

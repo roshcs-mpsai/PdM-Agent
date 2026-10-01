@@ -12,3 +12,10 @@ venv/
 mlruns/
 .pytest_cache/
 .DS_Store
+
+# pip install -e lib
+*.egg-info/
+build/
+
+# secrets (database and API passwords arrive in R1a.3)
+.env

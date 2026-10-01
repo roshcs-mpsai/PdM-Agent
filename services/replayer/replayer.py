@@ -11,43 +11,23 @@ with --log (one "<topic> <payload>" line per message): the logs are
 byte-identical across runs. There is no random element, hence no seed.
 
 Asset facts -- signal names, topic namespace, payload schema id -- come from
-the asset profile (PR-04). Nothing in this file names an asset-specific
-signal. The payload schema is documented in services/replayer/README.md and
-validated by tests/test_replayer.py.
+the asset profile (PR-04), loaded through pdm_common. Nothing in this file
+names an asset-specific signal. The payload schema is documented in
+services/replayer/README.md and validated by tests/test_replayer.py.
 """
 from __future__ import annotations
 
 import argparse
 import csv
-import json
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-import yaml
+from pdm_common.hashing import canonical_json
+from pdm_common.profile import ProfileError, load_profile, signal_names
 
-
-def load_profile(path: str | Path) -> dict:
-    """Load the asset profile and check the keys the replayer depends on."""
-    with open(path) as f:
-        profile = yaml.safe_load(f)
-    try:
-        profile["asset"]["id"]
-        profile["topics"]["telemetry"]
-        profile["topics"]["payload_schema"]
-        profile["signals"]["analog"]
-        profile["signals"]["digital"]
-    except (KeyError, TypeError) as exc:
-        raise SystemExit(f"{path}: asset profile is missing required key: {exc}")
-    return profile
-
-
-def signal_names(profile: dict) -> list[str]:
-    """All signal names, analog then digital, in profile order."""
-    return [s["name"] for s in profile["signals"]["analog"]] + [
-        s["name"] for s in profile["signals"]["digital"]
-    ]
+__all__ = ["load_profile", "signal_names", "build_message", "replay", "step_wait"]
 
 
 def check_header(fieldnames: list[str] | None, signals: list[str], source: str) -> None:
@@ -62,16 +42,14 @@ def check_header(fieldnames: list[str] | None, signals: list[str], source: str) 
 
 def build_message(profile: dict, seq: int, ts: datetime, values: dict) -> tuple[str, str]:
     """One row -> (topic, canonical JSON payload). Pure function; no clock."""
-    payload = json.dumps(
+    payload = canonical_json(
         {
             "schema": profile["topics"]["payload_schema"],
             "asset": profile["asset"]["id"],
             "seq": seq,
             "ts": ts.isoformat(),
             "signals": values,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+        }
     )
     return profile["topics"]["telemetry"], payload
 
@@ -201,7 +179,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    profile = load_profile(args.profile)
+    try:
+        profile = load_profile(args.profile)
+    except ProfileError as exc:
+        raise SystemExit(str(exc))
     publish = close = None
     if not args.dry_run:
         publish, close = make_mqtt_publisher(args.broker, args.port, args.qos)
