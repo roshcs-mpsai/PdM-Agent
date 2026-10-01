@@ -1,0 +1,3 @@
+# Dashboard only; the services and tests do not need it.
+#   pip install -r services/dashboard/requirements.txt
+streamlit>=1.37

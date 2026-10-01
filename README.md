@@ -54,6 +54,29 @@ docker compose up -d               # Mosquitto broker (walking skeleton)
 jupyter lab notebooks/metropt3_eda.ipynb   # downloads the dataset on first run
 ```
 
+## Run the walking skeleton (R0)
+
+A replayed record travels replayer -> ingest -> z-score detector -> retained
+status -> status board, with a log line per window at every hop. One
+terminal per service, from the repository root:
+
+```bash
+P=profiles/metropt3_apu/asset_profile.yaml
+docker compose up -d                                         # broker on localhost:1883
+python services/detector/zscore.py --profile $P --fit \
+  --data "data/MetroPT3(AirCompressor).csv" --candidate H4   # once: fit on healthy H4
+python services/ingest/ingest.py --profile $P
+python services/detector/zscore.py --profile $P
+streamlit run services/dashboard/app.py                      # or: python services/dashboard/status_view.py --watch 2
+python services/replayer/replayer.py --profile $P \
+  --data "data/MetroPT3(AirCompressor).csv" --speed 1000 --limit 5000
+```
+
+Ctrl-C on ingest prints its reconciliation (in = accepted + quarantined).
+To watch the status turn amber, replay the F4 lead-up instead:
+`--from 2020-07-15T10:00:00 --to 2020-07-15T20:00:00`.
+The same chain runs as a test: `PDM_TEST_BROKER=localhost:1883 pytest -q -m e2e`.
+
 ## Working agreements
 
 - `main` is protected; changes land by PR with green CI.
