@@ -1,0 +1,36 @@
+# minimal_asset_profile.yaml with deliberate faults. Every faulty line ends in
+# "# MALFORMED"; tests/test_schema.py expects one error on exactly those lines.
+schema_version: "0.2"
+asset:
+  id: demo_pump
+  description: "toy asset for schema tests"
+  campaign: [2021-01-01, 2021-01-31]
+  records: 100
+source_timezone: Europe/Lisbn                                    # MALFORMED
+sampling: {step_seconds: 1, rate_hz: 1.0, jitter_seconds: [1, 1], resample_rule: 1s}
+gap_policy: {max_bridge_seconds: 3, drop_window_if_gap_exceeds: 3s}
+freeze_rule: {min_duration: 30min, max_step_s: 2}
+windowing: {length: 1min, stride: 10 seconds}                    # MALFORMED
+gate: {span: 5min, min_fraction: 1.5, hold_off: 1h}              # MALFORMED
+ne107: {maintenance_p72_upper: 0.5, failure_p24_lower: 0.5, no_data_after: 1min}
+topics:
+  telemetry: pdm/demo_pump/telemetry
+  payload_schema: telemetry_json_v1
+  windows: pdm/other_asset/windows                               # MALFORMED
+  scores: pdm/demo_pump/scores
+  status: pdm/demo_pump/status
+signals:
+  analog:
+    - {name: flow, unit: m3/h, range: [0.0, 50.0], desc: "outlet flow"}
+    - {name: inlet_pressure, unit: bar, range: [10.0, -1.0], desc: "suction pressure"}   # MALFORMED
+  digital:
+    - {name: running, active_means: "pump on", duty: 0.5, polarity: upside_down}       # MALFORMED
+features: {pipeline: resample_1s}
+detector:
+  inputs: [flow, outlet_temp]                                    # MALFORMED
+  engineered:
+    - {name: run_share_1h, kind: share_of_time, signal: flow, above: 1.0, window: 1h, desc: "share of time pumping"}
+  fit_on: healthy_windows
+  score: per_signal_reconstruction_error
+  threshold: 3.0                                                 # MALFORMED
+references: {events_file: events.yaml, skills_folder: skills/demo_pump, checks_registry: checks/demo_pump}

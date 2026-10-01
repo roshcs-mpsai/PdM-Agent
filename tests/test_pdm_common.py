@@ -50,7 +50,7 @@ def test_signal_names_come_from_the_profile_analog_first():
 def test_missing_key_is_named(tmp_path):
     bad = tmp_path / "asset_profile.yaml"
     bad.write_text("asset: {id: x}\nsignals: {analog: [], digital: []}\n")
-    with pytest.raises(ProfileError, match="topics.telemetry"):
+    with pytest.raises(ProfileError, match="topics: Field required"):
         load_profile(bad)
 
 

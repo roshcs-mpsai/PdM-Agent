@@ -10,7 +10,8 @@ pip install -e lib     # once per environment; CI does the same
 
 | Module | What it gives you | Requirements |
 |---|---|---|
-| `profile` | `load_profile()`, `profile_hash()`, `signal_names()`, `events_file()` | CFG-01, CFG-07 |
+| `profile` | `load_profile()` (validates against `schema`), `profile_hash()`, `signal_names()`, `events_file()` | CFG-01, CFG-07 |
+| `schema` | `AssetProfile` (schema 0.2) and `validate_profile()`, which reports every problem as `file:line: key.path: message` | CFG-02, CFG-08 |
 | `events` | `load_events()`, `events_hash()`, `event_span()`, `half_open()` | CFG-04 |
 | `hashing` | `sha256_file()`, `canonical_json()` for payloads | CFG-07, NFR-05 |
 | `timeutil` | `to_utc()`, `iso_utc()`, `parse_duration()` | ING-09 |

@@ -1,7 +1,17 @@
-# asset_profile.yaml -- v0.1 (2026-09-20, Rosh)
+# asset_profile.yaml -- v0.2 (2026-09-30, Rosh)
 # Single source of asset-specific configuration (PR-04). All downstream
 # components read this file; no MetroPT-specific names in shared code.
-# Values marked MEASURED come from the EDA run of 2026-09-19 on the full file.
+# Validated at start-up against pdm_common.schema.AssetProfile (CFG-02): a
+# malformed profile stops the service with file:line errors.
+# Values marked MEASURED come from the EDA run of 2026-09-19 on the full file,
+# re-checked in the EDA verification of 2026-09-25/27.
+# v0.2: design keys from the FRD/HLD (source_timezone, freeze_rule, windowing,
+#       gate, ne107), the topic tree for the R0 services, DV_pressure out of
+#       the detector inputs, load-share features in place of comp_cycle_rate
+#       (a logger-freeze artifact), and the digital-channel verdicts from the
+#       verification.
+
+schema_version: "0.2"
 
 asset:
   id: metropt3_apu
@@ -9,43 +19,74 @@ asset:
   campaign: [2020-02-01, 2020-09-01]
   records: 1516948            # MEASURED -- matches UCI exactly
 
+source_timezone: UTC          # fixed clock: no jump at the 2020-03-29 DST change (EDA 2.1, ING-09)
+
 sampling:
   step_seconds: 10            # MEASURED: median timestamp delta
   rate_hz: 0.1
-  jitter_seconds: [9, 13]     # MEASURED: common delta range -- clock is not a clean grid
+  jitter_seconds: [9, 10]     # MEASURED: real steps are 9-10 s; 99.5 % of the 11-13 s steps are logger freezes
   resample_rule: 10s          # resample to a regular grid before windowing
 
 gap_policy:
   # 331 gaps, ~909 h missing (MEASURED). Never bridge day-scale gaps.
-  max_bridge_seconds: 30      # forward-fill/interpolate at most 3 samples
+  max_bridge_seconds: 30      # interpolate/forward-fill at most two empty grid points
   drop_window_if_gap_exceeds: 30s
 
-topics:                       # PR-01 namespace (stub -- walking skeleton fills this in)
+freeze_rule:                  # logger freeze: every analog channel unchanged row to row,
+  min_duration: 30min         #   every step <= max_step_s, lasting at least min_duration
+  max_step_s: 15              #   (EDA 2.2: ten runs, all with a 12 s step). Masked first.
+
+windowing:                    # ING-11; proposed, tuned on training folds only
+  length: 10min
+  stride: 1min
+
+gate:                         # INC-01, INC-03; calibrated on training folds
+  span: 30min
+  min_fraction: 0.8
+  hold_off: 6h
+
+ne107:                        # FRD section 8 mapping, proposed
+  maintenance_p72_upper: 0.5
+  failure_p24_lower: 0.5
+  no_data_after: 5min
+
+topics:                       # FRD section 9 topic tree; QoS 1, canonical JSON
   telemetry: pdm/metropt3_apu/telemetry
   payload_schema: telemetry_json_v1
+  windows: pdm/metropt3_apu/windows
+  scores: pdm/metropt3_apu/scores
+  status: pdm/metropt3_apu/status      # retained
 
 signals:
   analog:                     # plausibility ranges from observed min/max, rounded out
     - {name: TP2,             unit: bar,  range: [-0.1, 11.0], desc: "pressure at the compressor"}
     - {name: TP3,             unit: bar,  range: [0.5, 11.0],  desc: "pressure at the pneumatic panel"}
     - {name: H1,              unit: bar,  range: [-0.1, 11.0], desc: "pressure drop at the cyclonic separator"}
-    - {name: DV_pressure,     unit: bar,  range: [-0.1, 10.5], desc: "pressure drop at the towers' discharge"}
+    - {name: DV_pressure,     unit: bar,  range: [-0.1, 10.5], desc: "pressure drop at the towers' discharge; flat after the Jun 8 repair"}
     - {name: Reservoirs,      unit: bar,  range: [0.5, 11.0],  desc: "downstream reservoir pressure"}
     - {name: Oil_temperature, unit: degC, range: [10.0, 95.0], desc: "compressor oil temperature"}
     - {name: Motor_current,   unit: A,    range: [0.0, 10.0],  desc: "one motor phase (~0 off, ~4 A offload, ~6-7 A loaded)"}
   digital:
     # active_means per Veloso et al. (2022), checked against MEASURED duty cycles.
     # polarity: verified  = description consistent with observed behaviour
+    #           plausible = consistent, not yet confirmed
     #           suspect_inverted = duty cycle contradicts description; treat 0 as
     #           the eventful state until confirmed from transitions around failures
+    # informative: false = carries no usable information at this sampling rate
     - {name: COMP,             active_means: "no air intake (off / offloaded)",   duty: 0.837, polarity: verified}
-    - {name: DV_eletric,       active_means: "compressor under load",             duty: 0.161, polarity: verified}
-    - {name: Towers,           active_means: "tower two drying",                  duty: 0.920, polarity: plausible}
+    - {name: DV_eletric,       active_means: "compressor under load",             duty: 0.161, polarity: verified,
+       note: "reads 1 with the motor off in 0.14 % of samples (load commanded, motor off); load share uses Motor_current instead (EDA 5.2)"}
+    - {name: Towers,           active_means: "tower two drying",                  duty: 0.920, polarity: verified,
+       note: "switches only under load: 0.50 loaded, 1.00 otherwise, hence the 92 % duty (EDA 4.1)"}
     - {name: MPG,              active_means: "mirrors COMP (starts load < 8.2 bar)", duty: 0.833, polarity: verified}
-    - {name: LPS,              active_means: "pressure below 7 bar",              duty: 0.003, polarity: verified}
-    - {name: Pressure_switch,  active_means: "pilot-valve pressure detected",     duty: 0.991, polarity: suspect_inverted}
-    - {name: Oil_level,        active_means: "oil below expected level",          duty: 0.904, polarity: suspect_inverted}
-    - {name: Caudal_impulses,  active_means: "air-flow pulses present",           duty: 0.937, polarity: suspect_inverted}
+    - {name: LPS,              active_means: "pressure below 7 bar",              duty: 0.003, polarity: verified,
+       note: "LPS = 1 coincides with Reservoirs < 7 bar (84 % / 96 %)"}
+    - {name: Pressure_switch,  active_means: "pilot-valve pressure detected",     duty: 0.991, polarity: suspect_inverted,
+       note: "0 is the rare event (~22 transitions/day), a load effect rather than a failure signal"}
+    - {name: Oil_level,        active_means: "oil below expected level",          duty: 0.904, polarity: suspect_inverted,
+       note: "no change at any of the four leaks; reads 0 for most of Aug 5-14 and Aug 18-24"}
+    - {name: Caudal_impulses,  active_means: "air-flow pulses present",           duty: 0.937, polarity: suspect_inverted,
+       informative: false, note: "uninformative at 0.1 Hz: median 0 transitions/day; 34 % zeros in March only"}
 
 features:
   # Per-asset feature pipeline -- the modality seam. The APU is slow process
@@ -56,19 +97,34 @@ features:
 
 detector:
   # Reservoirs dropped as input: r = 1.00 with TP3 (MEASURED). Kept for the
-  # consistency check below.
-  inputs: [TP2, TP3, H1, DV_pressure, Oil_temperature, Motor_current]
+  # consistency check below. DV_pressure dropped: flat after the Jun 8 repair
+  # (regime dv_pressure_flat in events.yaml), so a fit across that date would
+  # learn the date, not the fault.
+  inputs: [TP2, TP3, H1, Oil_temperature, Motor_current]
   engineered:
-    - name: comp_cycle_rate
-      desc: "rolling COMP transitions per hour"
-      justification: "cycling spikes 750-1,400/day vs ~50 baseline precede failures (EDA S4)"
-  fit_on: healthy_windows      # from events.yaml, window-level, both regimes, parked stretches excluded
+    # Built on Motor_current, not DV_eletric, which reads 1 with the motor off
+    # (EDA 5.2). Replaces comp_cycle_rate: the COMP "cycling spikes" were all
+    # logger freezes. Evaluated under leave-one-event-out before use.
+    - name: load_share_6h
+      kind: share_of_time       # share of observed samples meeting the condition, trailing window
+      signal: Motor_current
+      above: 4.5                # A: motor loaded
+      window: 6h
+      desc: "share of time with the motor loaded (Motor_current > 4.5 A), rolling 6 h"
+    - name: rest_share_6h
+      kind: share_of_time
+      signal: Motor_current
+      below: 1.0                # A: switched off
+      window: 6h
+      desc: "share of time switched off (Motor_current < 1 A), rolling 6 h"
+  fit_on: healthy_windows      # negative zone of the events.yaml timeline, every regime
   score: per_signal_reconstruction_error
 
 consistency_checks:            # deterministic checks registry (PR-10), Journey C
   - name: tp3_reservoirs_divergence
     rule: "abs(TP3 - Reservoirs) > 0.1 bar sustained over 10 min"
     meaning: "instrumentation fault on one pressure channel, not a process fault"
+    note: "never fires on the 2020 data (p99.9 difference 0.010 bar); Journey C needs injected faults"
   - name: digital_polarity_audit
     rule: "suspect_inverted channels: verify eventful state from transitions in failure windows"
     status: open

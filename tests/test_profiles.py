@@ -42,6 +42,29 @@ def test_asset_profile_invariants():
     assert p["features"]["pipeline"]
 
 
+def test_asset_profile_v02_decisions():
+    """R1a.2: the EDA verification's changes to the profile."""
+    p = _load("asset_profile.yaml")
+    assert p["schema_version"] == "0.2"
+    assert p["source_timezone"] == "UTC"          # unbroken through the DST change
+    # DV_pressure is flat after the Jun 8 repair: the detector would learn the date
+    assert "DV_pressure" not in p["detector"]["inputs"]
+    # load share on motor current replaces the COMP cycle rate (a freeze artifact)
+    engineered = {f["name"]: f for f in p["detector"]["engineered"]}
+    assert set(engineered) == {"load_share_6h", "rest_share_6h"}
+    assert all(f["signal"] == "Motor_current" for f in engineered.values())
+    assert engineered["load_share_6h"]["above"] == 4.5
+    assert engineered["rest_share_6h"]["below"] == 1.0
+    digital = {s["name"]: s for s in p["signals"]["digital"]}
+    assert digital["Towers"]["polarity"] == "verified"
+    assert digital["Caudal_impulses"]["informative"] is False
+    # the design keys from the FRD/HLD
+    assert p["windowing"] == {"length": "10min", "stride": "1min"}
+    assert p["gate"] == {"span": "30min", "min_fraction": 0.8, "hold_off": "6h"}
+    assert p["freeze_rule"] == {"min_duration": "30min", "max_step_s": 15}
+    assert set(p["ne107"]) == {"maintenance_p72_upper", "failure_p24_lower", "no_data_after"}
+
+
 def test_events_invariants():
     e = _load("events.yaml")
     assert len(e["failures"]) == 4
