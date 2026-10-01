@@ -31,6 +31,14 @@ gap_policy:
   # 331 gaps, ~909 h missing (MEASURED). Never bridge day-scale gaps.
   max_bridge_seconds: 30      # interpolate/forward-fill at most two empty grid points
   drop_window_if_gap_exceeds: 30s
+  gap_labels:                 # raw timestamp gaps (EDA 2.1); pdm_common.quality.label_gaps
+    min_gap: 50s              # a step longer than 5 x the step is a gap: 331 (MEASURED)
+    long_outage: 12h          # 15 gaps, 340 h; the survival model censors at these only
+    overnight_stop:           # the train parked overnight: 57 gaps (MEASURED)
+      min_duration: 3h
+      starts_after: "19:00"   # UTC, wrapping midnight
+      starts_before: "03:00"
+      ends_before: "06:00"
 
 freeze_rule:                  # logger freeze: every analog channel unchanged row to row,
   min_duration: 30min         #   every step <= max_step_s, lasting at least min_duration

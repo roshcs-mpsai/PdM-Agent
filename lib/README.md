@@ -15,6 +15,7 @@ pip install -e lib     # once per environment; CI does the same
 | `events` | `load_events()`, `events_hash()`, `event_span()`, `half_open()` | CFG-04 |
 | `hashing` | `sha256_file()`, `canonical_json()` for payloads | CFG-07, NFR-05 |
 | `timeutil` | `to_utc()`, `iso_utc()`, `parse_duration()` | ING-09 |
+| `quality` | `freeze_runs()`, `frozen_rows()`, `to_grid()` (mask first, epoch-aligned UTC grid, bridge one or two interior points), `raw_gaps()`, `label_gaps()`, and `mask_grid_and_gaps()` with every parameter from the profile | ING-09, ING-10 |
 | `windows` | `MinuteWindower`: one-minute means, shared by the ingest stub and the R0 z-score fit (replaced in R1a.5) | ING-11 stub |
 | `mqtt` | `run_service()`: subscribe, handle, publish at QoS 1, flush on shutdown; `read_retained()` | — |
 | `status` | NE 107 states, `r0_status()`, dashboard `marker()` colours | INC-07 stub |

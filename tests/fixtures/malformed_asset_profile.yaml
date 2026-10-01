@@ -8,7 +8,11 @@ asset:
   records: 100
 source_timezone: Europe/Lisbn                                    # MALFORMED
 sampling: {step_seconds: 1, rate_hz: 1.0, jitter_seconds: [1, 1], resample_rule: 1s}
-gap_policy: {max_bridge_seconds: 3, drop_window_if_gap_exceeds: 3s}
+gap_policy:
+  max_bridge_seconds: 3
+  drop_window_if_gap_exceeds: 3s
+  gap_labels: {min_gap: 5s, long_outage: 12h,
+               overnight_stop: {min_duration: 3h, starts_after: "22:00", starts_before: "02:00", ends_before: "07:00"}}
 freeze_rule: {min_duration: 30min, max_step_s: 2}
 windowing: {length: 1min, stride: 10 seconds}                    # MALFORMED
 gate: {span: 5min, min_fraction: 1.5, hold_off: 1h}              # MALFORMED

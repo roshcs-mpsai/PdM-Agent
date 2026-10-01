@@ -65,9 +65,34 @@ class Sampling(_Strict):
         return self
 
 
+def _clock(text: str) -> str:
+    try:
+        dt.time.fromisoformat(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"not a clock time: {text!r} (use 'HH:MM')") from exc
+    return text
+
+
+Clock = Annotated[str, AfterValidator(_clock)]
+
+
+class OvernightStop(_Strict):
+    min_duration: Duration
+    starts_after: Clock
+    starts_before: Clock
+    ends_before: Clock
+
+
+class GapLabels(_Strict):
+    min_gap: Duration
+    long_outage: Duration
+    overnight_stop: OvernightStop
+
+
 class GapPolicy(_Strict):
     max_bridge_seconds: float = Field(ge=0)
     drop_window_if_gap_exceeds: Duration
+    gap_labels: GapLabels
 
 
 class FreezeRule(_Strict):
