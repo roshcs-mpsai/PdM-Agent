@@ -1,20 +1,46 @@
-# events.yaml -- v0.2 (2026-09-30, Rosh)
+# events.yaml -- v0.3 (2026-10-04, Rosh)
 # Failure windows, timeline zones and label policy for MetroPT-3 (2020 campaign).
 # PR-03 / CFG-04: windows, exclusions and healthy-period selection live here, not in code.
 # v0.1: zones + three padding types from the Week 6 training-data design;
 #       event verification resolved against UCI (all four are air leaks).
 # v0.2: applies the EDA verification (Sept 25-27): maintenance hours from the UCI
 #       description PDF, the ten logger-freeze masks, uncertain periods rebuilt
-#       from the continuous-load episodes (the Jun 12-14 and Jul 24-26 entries
-#       were freeze artifacts and are gone), the Jun 8 grey period and regime
+#       from the continuous-load episodes, the Jun 8 grey period and regime
 #       boundary, gap edges, and healthy candidates re-checked at window level.
+# v0.3: applies the Oct 4 review (EDA v4, Sections 4, 5.1, 7.2):
+#       * the three lps_heavy uncertain periods are REMOVED. They came from a
+#         per-day "LPS hours" figure that multiplied the share of recorded rows by
+#         24, so minutes on low-coverage days read as hours: Apr 25 had 1.2 h of
+#         data and 12 min of LPS (read 3.97 h), May 10 had 0.9 h after a 22 h gap
+#         and 9 min of LPS while the panel refilled from 1.2 bar (read 3.87 h), and
+#         Jun 28 had 0.9 h after a 36 h gap and 8 min while refilling from 2.0 bar
+#         (read 3.48 h, placed on Jun 30 - Jul 2). Counted as rows x 10 s, no day
+#         in those spans has more than 12 min of LPS. The refill after a restart is
+#         what the gap edge already classifies.
+#       * a second label source: the 21 failures of the maintenance expert's log
+#         (Davari et al., 2021, Table II). The four failures above are the subset
+#         that forced a repair. The other 13 get the expert_reported zone below.
+#       * Apr 12, May 13 and May 19-20 were uncertain episodes (load_held /
+#         probable_leak); the log reports them as failures #1, #6 and #9-10, so
+#         they are no longer uncertain. The episode rule now runs at 30 min (the
+#         scale at which it matches the log) instead of 4 h, so the eight March
+#         runs, outside the log's coverage, are the uncertain periods.
+#       * healthy candidates H1 and H5 return (they were lost to lps_heavy).
+#       * the data-quality events (motor-off command spells and the large
+#         pressure losses across recording gaps), derived by the EDA, as data the
+#         checks registry (C1, C8) and the "report both" false-alarm rate can read.
 #
 # Sources:
 #   failure windows + maintenance : UCI description PDF (data/Data Description_Metro.pdf),
 #                                   checked to the minute 2026-09-25
-#   masks, episodes, regimes      : notebooks/metropt3_eda.ipynb, Sections 2.2, 3.1, 5.1, 6
+#   expert_reported               : Davari et al. (2021), "Predictive maintenance based on
+#                                   anomaly detection using deep learning for air production
+#                                   unit in the railway industry", DSAA 2021, Table II
+#                                   (as transcribed in notebooks/detector_selection.ipynb 8.1)
+#   masks, episodes, regimes      : notebooks/metropt3_eda.ipynb v4, Sections 2.2, 5.1, 6
 # Reports record DETECTION, not onset, and failure 1 spans exactly one calendar
-# day, so labels are day-granular. The paddings below reflect that.
+# day, so the four repair-forcing labels are day-granular. The expert's 21 are
+# given to the minute. The paddings below reflect both.
 #
 # Time conventions -- every consumer reads these the same way:
 #   * All times are UTC. The logger clock is fixed UTC+0: it records straight
@@ -24,29 +50,41 @@
 #     [start 00:00, day after end 00:00).
 #   * Buffers and regimes are half-open: [start, end).
 
-schema_version: "0.2"
+schema_version: "0.3"
 asset: metropt3_apu
 campaign: [2020-02-01, 2020-09-01]
-label_granularity: day
+label_granularity: day            # the four repair-forcing failures; expert_reported is to the minute
+
+label_sources:
+  - {id: uci_pdf,  what: "4 air leaks with maintenance actions (F1-F4)", granularity: day}
+  - {id: davari_2021_table2, what: "21 failures reported by the maintenance expert, April-July 2020; F1-F4 are among them", granularity: minute}
 
 # Three distinct paddings, tuned independently (Week 6 design):
-guard_band:            # label uncertainty around every reported window
+guard_band:            # label uncertainty around every repair-forcing report window
   before: 24h          # default since the Sept 23 cut-off; change at a sync
   after: 12h
+expert_band:           # around each expert-reported failure that forced no repair
+  before: 1h           # the log is to the minute; an hour covers when the fault was noticed
+  after: 6h            # the gate's hold-off: the detector's trailing alarm is not a false alarm
 healthy_buffer:        # protects training data; defines the grey zone
   before_failure: 7d
   after_repair: 48h    # from the maintenance hour; from the window end for F1 (no repair listed)
 gap_edges:             # grey after each recording gap (raw timestamp gaps; a freeze keeps
   after_gaps_of: 30min #   its timestamps and gets no edge). TP3 is below its healthy 1st
-  length: 15min        #   percentile at 58 % of resumes, 4 % fifteen minutes later (EDA 7.2)
+  length: 15min        #   percentile at 58 % of resumes, 4 % fifteen minutes later (EDA 7.2).
+                       #   OPEN (Oct 4): the detector's restart alarms open 24-25 min after
+                       #   resume; EDA v4 2.3 measures the refill run per restart so the sync
+                       #   can choose between this fixed edge and a state-based one.
 lead_horizons: [2h, 24h, 72h]   # detection evaluated at each; no single window
 
 # Timeline zones (every timestamp gets exactly one label; precedence in this order):
-#   masked    = data_quality_masks (excluded from training, scoring and evaluation)
-#   positive  = report window, guard-banded
-#   grey      = uncertain_periods, grey_periods, gap edges, rest of the healthy buffers
-#   negative  = everything else (the only detector training data)
-#   censored  = end of campaign + the 15 long outages (survival model only)
+#   masked          = data_quality_masks (excluded from training, scoring and evaluation)
+#   positive        = report window (F1-F4), guard-banded
+#   expert_reported = an expert-logged failure that forced no repair, with expert_band;
+#                     grey for training and calibration, scored as a failure by the harness
+#   grey            = uncertain_periods, grey_periods, gap edges, rest of the healthy buffers
+#   negative        = everything else (the only detector training data)
+#   censored        = end of campaign + the 15 long outages (survival model only)
 
 failures:
   - id: F1
@@ -54,18 +92,21 @@ failures:
     start: 2020-04-18 00:00
     end:   2020-04-18 23:59
     maintenance: null               # none listed in the description PDF
-    notes: "UCI: air leak, high stress. Reported as the whole day, 00:00-23:59; the 12 h guard band covers the last minute. The 15 h before it are a logger freeze (Apr 17 09:20 - Apr 18 00:18)."
+    expert_numbers: [2, 3]
+    notes: "UCI: air leak, high stress. Reported as the whole day, 00:00-23:59; the 12 h guard band covers the last minute. The 15 h before it are a logger freeze (Apr 17 09:20 - Apr 18 00:18). The expert's #2 (Apr 18) and #3 (Apr 19 00:00-01:30) are this event."
   - id: F2
     type: air_leak
     start: 2020-05-29 23:30
     end:   2020-05-30 06:00
     maintenance: 2020-05-30 12:00   # the PDF prints "30Apr at 12:00", a typo for 30 May
-    notes: "May 26-28 is two logger freezes, not a cycling spike. The leak-like May 13-14 and May 19-20 episodes (uncertain_periods) may be its early stage."
+    expert_numbers: [12, 13]
+    notes: "May 26-28 is two logger freezes, not a cycling spike. The May 13-14 and May 19-20 episodes are the expert's failures #6 and #9-10 (expert_reported below), not an early stage of this one."
   - id: F3
     type: air_leak
     start: 2020-06-05 10:00
     end:   2020-06-07 14:30
     maintenance: 2020-06-08 16:00
+    expert_numbers: [16, 17, 18]
     paired_with: F2   # 6 days after F2: buffers overlap, no confirmed-negative
                       # between them; folds use asymmetric test blocks and
                       # F2/F3 results are reported as a paired case
@@ -75,11 +116,43 @@ failures:
     start: 2020-07-15 14:30
     end:   2020-07-15 19:00
     maintenance: 2020-07-16 00:00
+    expert_numbers: [20]
     notes: "No rest from Jul 15 00:00; Oil_temperature reaches 89.05 degC, the dataset maximum. A recording gap Jul 14 07:16-21:28 hides the onset."
+
+# The maintenance expert's log (Davari et al., 2021, Table II), to the minute.
+# Entries that fall inside F1-F4 are listed for completeness and take the
+# positive zone; the others take the expert_reported zone with expert_band.
+# EDA v4 5.1: sustained load of 30 min or more (TP2 > 6 bar and motor > 4.5 A in
+# every minute, holes of up to 2 min allowed, freezes masked) finds 16 runs in
+# April-July, 15 of them in this log, covering 18 of the 21; the exception is
+# Jun 8 12:01, the hour before F3's repair (grey_periods). No run of 20 min
+# reaches #5 (20 min) or #21 (a restart).
+expert_reported:
+  - {n: 1,  start: 2020-04-12 11:50, end: 2020-04-12 23:30, note: "was uncertain:load_held in v0.2 (TP3 +0.43 bar); the log reports it"}
+  - {n: 2,  start: 2020-04-18 00:00, end: 2020-04-18 23:59, in_failure: F1}
+  - {n: 3,  start: 2020-04-19 00:00, end: 2020-04-19 01:30, in_failure: F1}
+  - {n: 4,  start: 2020-04-29 03:20, end: 2020-04-29 04:00, note: "40 min; was negative, in a fit week"}
+  - {n: 5,  start: 2020-04-29 22:00, end: 2020-04-29 22:20, note: "20 min; was negative, in a fit week; no continuous-load run of 20 min reaches it"}
+  - {n: 6,  start: 2020-05-13 14:00, end: 2020-05-13 23:59, note: "was uncertain:probable_leak in v0.2 (TP3 -1.41 bar)"}
+  - {n: 7,  start: 2020-05-18 05:00, end: 2020-05-18 05:30, note: "30 min; was negative, in a calibrate week"}
+  - {n: 8,  start: 2020-05-19 10:10, end: 2020-05-19 11:00, note: "50 min; was negative, in a calibrate week"}
+  - {n: 9,  start: 2020-05-19 22:10, end: 2020-05-19 23:59, note: "with #10: was uncertain:probable_leak in v0.2 (TP3 -0.99 bar)"}
+  - {n: 10, start: 2020-05-20 00:00, end: 2020-05-20 20:00}
+  - {n: 11, start: 2020-05-23 09:50, end: 2020-05-23 10:10, note: "20 min; in F2's healthy buffer"}
+  - {n: 12, start: 2020-05-29 23:30, end: 2020-05-29 23:59, in_failure: F2}
+  - {n: 13, start: 2020-05-30 00:00, end: 2020-05-30 06:00, in_failure: F2}
+  - {n: 14, start: 2020-06-01 15:00, end: 2020-06-01 15:40, note: "in F3's healthy buffer"}
+  - {n: 15, start: 2020-06-03 10:00, end: 2020-06-03 11:00, note: "the Jun 3 charge that EDA v3.3 5.2 read as 'a busy hour'; in F3's buffer"}
+  - {n: 16, start: 2020-06-05 10:00, end: 2020-06-05 23:59, in_failure: F3}
+  - {n: 17, start: 2020-06-06 00:00, end: 2020-06-06 23:59, in_failure: F3}
+  - {n: 18, start: 2020-06-07 00:00, end: 2020-06-07 14:30, in_failure: F3}
+  - {n: 19, start: 2020-07-08 17:30, end: 2020-07-08 19:00, note: "the Jul 8 pressure drop a week before F4; in F4's buffer"}
+  - {n: 20, start: 2020-07-15 14:30, end: 2020-07-15 19:00, in_failure: F4}
+  - {n: 21, start: 2020-07-17 04:30, end: 2020-07-17 05:30, note: "a restart with low pressure; in F4's after-repair buffer"}
 
 # Grey spans that are neither uncertain episodes nor buffers.
 grey_periods:
-  - {start: 2020-06-08 11:48, end: 2020-06-08 16:00, reason: "data resumed before the F3 repair"}
+  - {start: 2020-06-08 11:48, end: 2020-06-08 16:00, reason: "data resumed before the F3 repair; 1.1 h of continuous load at 12:01"}
 
 # Logger freezes: all seven analog channels exactly constant, 12 s step, COMP
 # chattering (EDA 2.2; freeze_rule in asset_profile.yaml). Ten runs, 169.8 h,
@@ -96,29 +169,52 @@ data_quality_masks:
   - {start: 2020-07-21 13:45:12, end: 2020-07-21 22:03:16, kind: logger_freeze}   # off
   - {start: 2020-07-22 06:43:44, end: 2020-07-22 13:04:24, kind: logger_freeze}   # off-load, 3.74 A
 
-# Anomalous periods with NO matching failure report (EDA Sections 4.1, 5.1).
+# Anomalous periods with NO matching failure report in either source (EDA v4 5.1).
 # Policy: excluded from healthy-data selection; the false-alarm rate is reported
 # both with and without these periods; alarms inside them are audited manually
 # rather than counted as false.
-# Tags: lps_heavy     = long LPS activity (Reservoirs < 7 bar), no report
-#       load_held     = continuous load with TP3 held or rising -- not leak-like
+# Tags: load_held     = continuous load with TP3 held or rising
 #       probable_leak = continuous load with TP3 falling against the prior week
-# Episode rule: every minute for >= 4 h holds a sample with TP2 > 6 bar and
-# Motor_current > 4.5 A, freezes masked. It also finds F1-F3. Episode spans run
-# from the first to the last loaded sample, to the second (EDA 5.1 table).
-# OPEN: decide before quoting lead time whether alarms in the May 13-14 and
-# May 19-20 probable leaks count toward F2; until then they are reported as a
-# separate unlabeled leak-like line.
+#       (descriptive only: the log reports failures of both kinds; both tags
+#        take the same policy)
+# Episode rule (v0.3): every minute for >= 30 min holds a sample with TP2 > 6 bar
+# and Motor_current > 4.5 A, freezes masked, holes of up to 2 min allowed. In
+# April-July that rule finds 16 runs, 15 of them in the expert's log; the one
+# exception is the grey period before F3's repair. All eight runs it finds with
+# no report are in March, before the log begins, so they stay uncertain. (v0.2
+# used 4 h, which left the five shorter March runs negative; four of them were
+# the detector's "false alarms" on healthy weeks.)
 uncertain_periods:
-  - {start: 2020-04-25, end: 2020-04-27, tag: lps_heavy, reason: "LPS active ~4 h/day, then a 2-day recording gap; one week after F1"}
-  - {start: 2020-05-02, end: 2020-05-08, tag: lps_heavy, reason: "repeated heavy LPS activations (~2-3.9 h/day), no report"}
-  - {start: 2020-06-30, end: 2020-07-02, tag: lps_heavy, reason: "LPS active ~3.5 h/day, no report; overlaps healthy candidate H1"}
-  - {start: 2020-03-12 00:16:16, end: 2020-03-12 11:49:50, tag: load_held, reason: "continuous load, TP3 +0.37 bar"}
-  - {start: 2020-03-27 07:12:20, end: 2020-03-27 11:38:11, tag: load_held, reason: "continuous load, TP3 +0.22 bar"}
-  - {start: 2020-03-28 23:21:14, end: 2020-03-29 19:49:14, tag: probable_leak, reason: "continuous load, TP3 -0.43 bar"}
-  - {start: 2020-04-12 11:50:31, end: 2020-04-12 23:36:00, tag: load_held, reason: "continuous load, TP3 +0.43 bar"}
-  - {start: 2020-05-13 13:45:04, end: 2020-05-14 00:56:48, tag: probable_leak, reason: "continuous load, TP3 -1.41 bar"}
-  - {start: 2020-05-19 22:20:28, end: 2020-05-20 19:48:20, tag: probable_leak, reason: "continuous load, TP3 -0.99 bar"}
+  - {start: 2020-03-06 21:42:35, end: 2020-03-06 22:59:53, tag: load_held,     reason: "continuous load 1.3 h, TP3 +0.22 bar"}
+  - {start: 2020-03-11 05:15:30, end: 2020-03-11 06:10:11, tag: probable_leak, reason: "continuous load 0.9 h, TP3 -0.36 bar"}
+  - {start: 2020-03-11 18:29:41, end: 2020-03-11 18:59:14, tag: probable_leak, reason: "continuous load 0.5 h, TP3 -1.81 bar, min 7.31 bar"}
+  - {start: 2020-03-12 00:16:16, end: 2020-03-12 11:49:50, tag: load_held,     reason: "continuous load 11.6 h, TP3 +0.37 bar"}
+  - {start: 2020-03-26 04:00:40, end: 2020-03-26 04:52:52, tag: load_held,     reason: "continuous load 0.9 h, TP3 +0.21 bar"}
+  - {start: 2020-03-27 07:12:20, end: 2020-03-27 11:38:11, tag: load_held,     reason: "continuous load 4.4 h, TP3 +0.22 bar"}
+  - {start: 2020-03-28 07:22:34, end: 2020-03-28 08:49:39, tag: probable_leak, reason: "continuous load 1.5 h, TP3 -0.56 bar"}
+  - {start: 2020-03-28 23:21:14, end: 2020-03-29 19:49:14, tag: probable_leak, reason: "continuous load 20.5 h, TP3 -0.43 bar, min 5.73 bar"}
+
+# Data-quality events derived by the EDA (v4, Sections 5.3 and 8.3). Not zones:
+# they stay negative, are the evidence for checks C1 and C8, and let the
+# false-alarm rate be reported with and without alarms that open on them.
+data_quality_events:
+  motor_off_command:      # DV_eletric = 1 with Motor_current < 1 A, spells of 5 min or more (EDA v4 5.3)
+    - {start: 2020-04-06 11:27:52, end: 2020-04-06 11:52:09, minutes: 25, tp3_min_bar: 7.73}
+    - {start: 2020-04-25 00:34:20, end: 2020-04-25 01:10:51, minutes: 37, tp3_min_bar: 6.49}
+    - {start: 2020-05-19 01:50:10, end: 2020-05-19 02:40:33, minutes: 51, tp3_min_bar: 4.69}
+    - {start: 2020-06-02 19:05:00, end: 2020-06-02 19:54:35, minutes: 50, tp3_min_bar: 5.57}
+    - {start: 2020-07-14 01:14:09, end: 2020-07-14 02:50:17, minutes: 53, tp3_min_bar: 4.95}
+    - {start: 2020-07-17 01:14:28, end: 2020-07-17 01:19:17, minutes: 5,  tp3_min_bar: 1.45}
+    - {start: 2020-07-18 00:52:51, end: 2020-07-18 01:37:27, minutes: 6,  tp3_min_bar: 7.55}
+    - {start: 2020-07-28 03:35:54, end: 2020-07-28 04:03:09, minutes: 6,  tp3_min_bar: 7.61}
+    - {start: 2020-07-31 01:19:11, end: 2020-07-31 02:09:04, minutes: 50, tp3_min_bar: 5.24}
+    - {start: 2020-08-03 09:53:27, end: 2020-08-03 10:25:10, minutes: 32, tp3_min_bar: 6.02}
+    - {start: 2020-08-06 08:32:41, end: 2020-08-06 08:39:47, minutes: 7,  tp3_min_bar: 7.51}
+  gap_pressure_loss:      # TP3 lost across a recording gap of 5-120 min, above 5 bar (EDA v4 8.3)
+    - {gap_start: 2020-03-12 14:40:50, resume: 2020-03-12 15:28:30, minutes: 48, tp3_before_bar: 9.64, tp3_after_bar: 0.93, next_window: gap_edge}
+    - {gap_start: 2020-03-12 16:18:10, resume: 2020-03-12 16:37:10, minutes: 19, tp3_before_bar: 9.20, tp3_after_bar: 0.89, next_window: after_uncertain}
+    - {gap_start: 2020-04-19 02:14:30, resume: 2020-04-19 02:36:50, minutes: 22, tp3_before_bar: 7.74, tp3_after_bar: 1.00, next_window: failure}
+    - {gap_start: 2020-06-08 13:07:20, resume: 2020-06-08 13:40:10, minutes: 33, tp3_before_bar: 8.04, tp3_after_bar: 1.01, next_window: grey_period}
 
 # Verification note (2026-09-19, UCI page): all four 2020 events are air leaks
 # under high stress. The oil leak sometimes attributed to this dataset belongs
@@ -126,19 +222,11 @@ uncertain_periods:
 # types unseen in 2020 (oil leak, client-side leak); expect and report degradation.
 
 # Healthy-period candidates: whole days, end day included, with `exclude` spans
-# cut out. Re-checked at window level under the v0.2 exclusions (EDA Section 6):
-# H1 keeps 559 of 990 clean windows, H2 624 of 625, H6 405 of 432; H3, H4 and H7
-# are untouched. H5 is dropped (0 of 394 windows survive the May 2-8 LPS period),
-# and H3's conflict is cleared (Jun 12-14 was a logger freeze, not an episode).
-# The zone timeline (R1a.5) supersedes this list for training; it stays for
-# quick fits such as the R0 z-score baseline.
+# cut out. The zone timeline (R1a.5) supersedes this list for training; it stays
+# for quick fits such as the R0 z-score baseline. v0.3: H1 and H5 return now that
+# the lps_heavy periods are gone; H6 loses its last morning to the Mar 27 run.
 healthy_candidates:
-  - id: H1
-    start: 2020-06-29
-    end: 2020-07-05
-    days: 7
-    exclude:
-      - {start: 2020-06-30, end: 2020-07-02}            # lps_heavy uncertain period
+  - {id: H1, start: 2020-06-29, end: 2020-07-05, days: 7}
   - id: H2
     start: 2020-07-18
     end: 2020-07-22
@@ -148,12 +236,14 @@ healthy_candidates:
       - {start: 2020-07-22 06:43:44, end: 2020-07-22 13:04:24}   # logger freeze
   - {id: H3, start: 2020-06-13, end: 2020-06-16, days: 4}
   - {id: H4, start: 2020-03-21, end: 2020-03-23, days: 3}
+  - {id: H5, start: 2020-05-06, end: 2020-05-08, days: 3}
   - id: H6
     start: 2020-03-25
     end: 2020-03-27
     days: 3
     exclude:
-      - {start: 2020-03-27 07:12:20, end: 2020-03-27 11:38:11}   # load_held episode
+      - {start: 2020-03-26 04:00:40, end: 2020-03-26 04:52:52}   # continuous-load run (uncertain)
+      - {start: 2020-03-27 07:12:20, end: 2020-03-27 11:38:11}   # continuous-load run (uncertain)
   - {id: H7, start: 2020-08-06, end: 2020-08-08, days: 3}
 
 # Operating regimes (EDA Sections 3, 3.1). Half-open and tiling the campaign:

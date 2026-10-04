@@ -1,0 +1,114 @@
+# features.yaml -- v0.1 (2026-10-04, Rosh)
+# Declaration of every per-window feature the EDA v4 pipeline computes (notebooks/metropt3_eda_v4.ipynb,
+# Section 8.1), as data for the pdm_common port and for consumers that select features by role.
+# asset_profile.yaml stays at schema 0.2, whose `detector.engineered` admits only share_of_time
+# channels (pdm_common.schema forbids new keys); this file carries the full declaration until the
+# schema bump that lets the profile hold it. Generated from data/processed/feature_dictionary.csv.
+
+schema_version: "0.1"
+asset: metropt3_apu
+window: {length: 10min, stride: 1min, grid_step: 10s}
+parameters:
+  inputs: ['TP2', 'TP3', 'H1', 'Oil_temperature', 'Motor_current']
+  loaded_above_A: 4.5
+  stopped_below_A: 1.0
+  cut_out_bar: 9.5
+  share_window: 6h
+  share_min_data: 1h
+  stop: "30min gap or freeze"
+  deficit_baseline: "median of per-minute TP3 over the 7 days before the window"
+  deficit_min_coverage: 0.25
+  state_horizon: 6h
+  refill_min_minutes: 5
+  idle_loss_min_minutes: 60
+  lps_window: 24h
+
+# role: summary statistic | engineered | state | leak | data-quality flag
+# detector_v1: one of the 21 inputs the Oct 1 detector (PCA v1) was frozen on
+# drop_for_tabular: this run's redundancy pass (|r| >= 0.9 on healthy windows); the frozen detector's own
+#   drop list is the complement of detector_v1 among the summary and engineered roles
+features:
+  - {name: TP2_mean, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP2: mean over the window
+  - {name: TP2_std, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: true}
+    # TP2: standard deviation over the window
+  - {name: TP2_min, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP2: minimum over the window
+  - {name: TP2_max, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # TP2: maximum over the window
+  - {name: TP2_slope, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP2: last point minus first point of the window
+  - {name: TP3_mean, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP3: mean over the window
+  - {name: TP3_std, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP3: standard deviation over the window
+  - {name: TP3_min, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP3: minimum over the window
+  - {name: TP3_max, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP3: maximum over the window
+  - {name: TP3_slope, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # TP3: last point minus first point of the window
+  - {name: H1_mean, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # H1: mean over the window
+  - {name: H1_std, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # H1: standard deviation over the window
+  - {name: H1_min, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # H1: minimum over the window
+  - {name: H1_max, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # H1: maximum over the window
+  - {name: H1_slope, role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # H1: last point minus first point of the window
+  - {name: Oil_temperature_mean, role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # Oil_temperature: mean over the window
+  - {name: Oil_temperature_std, role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # Oil_temperature: standard deviation over the window
+  - {name: Oil_temperature_min, role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # Oil_temperature: minimum over the window
+  - {name: Oil_temperature_max, role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # Oil_temperature: maximum over the window
+  - {name: Oil_temperature_slope, role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    # Oil_temperature: last point minus first point of the window
+  - {name: Motor_current_mean, role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # Motor_current: mean over the window
+  - {name: Motor_current_std, role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # Motor_current: standard deviation over the window
+  - {name: Motor_current_min, role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # Motor_current: minimum over the window
+  - {name: Motor_current_max, role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # Motor_current: maximum over the window
+  - {name: Motor_current_slope, role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    # Motor_current: last point minus first point of the window
+  - {name: load_share_6h, role: "engineered", unit: "share", look_back: "6 h", detector_v1: true, drop_for_tabular: false}
+    # share of the trailing 6 h with Motor_current > 4.5 A (an hour of the 6 h must have data)
+  - {name: rest_share_6h, role: "engineered", unit: "share", look_back: "6 h", detector_v1: false, drop_for_tabular: true}
+    # share of the trailing 6 h with Motor_current < 1 A (same coverage rule)
+  - {name: hours_since_rest, role: "engineered", unit: "h", look_back: "unbounded", detector_v1: true, drop_for_tabular: false}
+    # hours since Motor_current was last below 1 A; a data gap or freeze of 30 min or more counts as a stop, a rest inside a shorter gap is missed
+  - {name: tp3_deficit_7d, role: "engineered", unit: "bar", look_back: "7 days", detector_v1: true, drop_for_tabular: false}
+    # window mean of TP3 minus the median of per-minute TP3 over the 7 days before the window (scored with at least a quarter of those days present)
+  - {name: oil_rise_1h, role: "engineered", unit: "degC", look_back: "1 h 10 min", detector_v1: true, drop_for_tabular: false}
+    # window mean of Oil_temperature minus the same an hour earlier
+  - {name: share_coverage_6h, role: "state", unit: "share", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # share of the trailing 6 h grid points that hold data
+  - {name: minutes_since_data_resumed, role: "state", unit: "min", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # minutes since data resumed after a missing run of 30 min or more, capped at 360
+  - {name: gap_hours, role: "state", unit: "h", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # length of that missing run, 0 when it ended more than 6 h ago, capped at 48
+  - {name: panel_pressure_at_resume, role: "state", unit: "bar", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # TP3 at the first point with data after that run; missing beyond 6 h
+  - {name: oil_at_resume, role: "state", unit: "degC", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # Oil_temperature at the first point with data after that run; missing beyond 6 h
+  - {name: refill_rate_6h, role: "leak", unit: "bar/min", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # mean TP3 rise per minute over steps with the motor loaded below 9.5 bar in the trailing 6 h (5 min of such steps needed)
+  - {name: idle_loss_6h, role: "leak", unit: "bar/h", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # mean TP3 fall per hour over steps with the motor not loaded in the trailing 6 h (60 min of such steps needed)
+  - {name: load_share_trend, role: "leak", unit: "share", look_back: "7 days", detector_v1: false, drop_for_tabular: false}
+    # load_share_6h minus the share of the trailing 7 days with Motor_current > 4.5 A (a quarter of the week needed)
+  - {name: lps_minutes_24h, role: "leak", unit: "min", look_back: "24 h", detector_v1: false, drop_for_tabular: false}
+    # minutes with LPS = 1 in the trailing 24 h
+  - {name: gap_leak_down, role: "leak", unit: "bar/h", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    # TP3 lost per hour across the last missing run of 30 min or more, when it ended within the past 6 h; missing otherwise
+  - {name: cmd_motor_off, role: "data-quality flag", unit: "count", look_back: "10 min", detector_v1: false, drop_for_tabular: false}
+    # points with DV_eletric = 1 while Motor_current < 1 A (load commanded, motor off)
+  - {name: n_bridged, role: "data-quality flag", unit: "count", look_back: "10 min", detector_v1: false, drop_for_tabular: false}
+    # bridged points in the window
