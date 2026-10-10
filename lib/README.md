@@ -30,6 +30,7 @@ pip install -e lib     # once per environment; CI does the same
 | `store` | `Store`, `open_store()`: one schema for PostgreSQL/TimescaleDB and SQLite, insert-only audit tables enforced by triggers, rows as dicts with UTC ISO times; `python -m pdm_common.store --ddl postgres` writes db/init/001_schema.sql | FRD section 8, ESR-02, HIL-05 |
 | `schemas` | `validate(name, doc)`, `check()`: the JSON Schemas in schemas/ for every payload, tool result and brief | FRD 9 |
 | `brief` | `validate_brief()` (citations, stored prognosis, numbers within rounding, insufficient-evidence rules), `fallback_brief()` | BRF-01 to BRF-07 |
+| `corpus` | `sanitize()`, `passages()`, `verify_register()`, `Corpus.load()` / `.search()` (BM25), `quote()`, `load_into_store()`: the knowledge corpus with its source register | AGT-09, AGT-10, PR-14 |
 | `checks` | `Evidence` (what an alarm's checks may read: the grid before the opening, the opening window, the gaps), `CheckResult`, `load_registry()`: the shared side of the per-asset checks in checks/<asset>/ | AGT-05 |
 | `metrics` | `service_metrics()`, `serve()`, `Registry`, `Counter`, `Gauge`, `Histogram`: Prometheus text format without a client library; the catalogue of every metric the dashboards read | OPS-02 |
 | `logs` | `setup()`, `context()`: one JSON object per log line with incident_id, trace_id and result ids (`PDM_LOG_FORMAT=text` for a terminal) | OPS-01 |
