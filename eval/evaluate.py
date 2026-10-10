@@ -7,6 +7,7 @@
         --golden data/processed_v4/detector_selection/selection.json         # the T27 done-check
     python eval/evaluate.py --processed DIR --scores scores_all.npz --key PCA   # saved scores, no fitting
     python eval/evaluate.py --processed data/processed_v4 --detector pca --threshold spot   # SPOT (T11)
+    python eval/evaluate.py --processed data/processed_v4 --frozen      # the frozen detector, no refit (T30)
 
 With --processed it fits each detector on the fit windows, sets its threshold
 on the calibrate weeks at the budget of two gated incidents a week, measures
@@ -169,8 +170,103 @@ def run(args) -> int:
         print(f"\nselected: {rule['selected']}")
         (out_root / "selection.json").write_text(json.dumps(rule, indent=2))
 
+    if args.save_bundle:
+        name = next(n for n in results if not n.endswith("+ SPOT"))
+        spot_name = f"{name} + SPOT"
+        use_spot = spot_name in results and results[spot_name]["spot"]["freeze_rule"]["use_spot"]
+        bundle = detector_bundle(models[name], name, results, use_spot, scaled, data, ctx, args, failures,
+                                 profile["asset"]["id"])
+        folder = Path(args.save_bundle)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bundle.json").write_text(json.dumps(bundle, sort_keys=True, indent=1) + "\n")
+        print(f"\nsaved the {name} bundle ({bundle['threshold']['kind']} threshold "
+              f"{bundle['threshold']['value']:.4f}) to {folder / 'bundle.json'}")
     if args.golden:
         return golden_check(results, Path(args.golden), failures)
+    return 0
+
+
+def detector_bundle(det, name, results, use_spot, scaled, data, ctx, args, failures, asset) -> dict:
+    """detector_bundle_v1: everything the services need to score as the harness did."""
+    import platform
+
+    import pandas as pd
+    import sklearn
+
+    import harness as h
+    if not hasattr(det, "pca"):
+        raise SystemExit(f"--save-bundle writes PCA bundles; {name} is not one")
+    chosen = results[f"{name} + SPOT"] if use_spot else results[name]
+    threshold = {"kind": "spot" if use_spot else "empirical", "value": chosen["threshold"],
+                 "percentile_of_calibrate_scores": round(chosen["threshold percentile"], 2),
+                 "empirical_value": results[name]["threshold"],
+                 "rule": "SPOT if its held-out interval stays at or under the budget and it catches every event; "
+                         "otherwise the empirical threshold, with SPOT as the comparison"}
+    if f"{name} + SPOT" in results:
+        spot = results[f"{name} + SPOT"]["spot"]
+        threshold["spot"] = {k: v for k, v in spot.items() if k != "scan"}
+    pca = det.pca
+    return {
+        "schema": "detector_bundle_v1", "asset": asset,
+        "detector": name, "features": scaled.features,
+        "scaler": {"healthy_median": scaled.healthy_median.tolist(), "mean": scaled.mean.tolist(),
+                   "std": scaled.std.tolist()},
+        "model": {"kind": "pca", "n_components": int(pca.n_components_), "components": pca.components_.tolist(),
+                  "mean": pca.mean_.tolist(), "explained_variance_ratio": pca.explained_variance_ratio_.tolist()},
+        "threshold": threshold, "gate": ctx.gate.as_dict(), "budget_per_week": args.budget,
+        "metrics": h.summary(chosen, failures),
+        "comparison": {k: h.summary(r, failures) for k, r in results.items()},
+        "inputs": {"windows_key": data.windows_key, "fit_key": h.fit_key(scaled.is_fit),
+                   "source_sha256": data.manifest["source"]["sha256"], "windows": len(data.windows),
+                   "fit_windows": int(scaled.fit_rows.sum())},
+        "versions": {"python": platform.python_version(), "numpy": np.__version__, "pandas": pd.__version__,
+                     "scikit_learn": sklearn.__version__},
+    }
+
+
+def run_frozen(args) -> int:
+    """T30: score with the frozen bundle -- no refit -- and reproduce its logged metrics."""
+    import harness as h
+    from pdm_common.events import load_events  # noqa: F401
+    from pdm_common.features import features_file, load_feature_spec
+    from pdm_common.frozen import FrozenError, load_frozen
+    from pdm_common.gate import gate_params
+    from pdm_common.profile import events_file, load_profile
+
+    profile = load_profile(args.profile)
+    spec = load_feature_spec(features_file(profile, args.profile))
+    try:
+        frozen = load_frozen(args.config, ROOT, run_id=args.run_id, profile=profile,
+                             events_path=events_file(profile, args.profile), spec_raw=spec.raw)
+    except FrozenError as exc:
+        print(f"refused: {exc}")
+        return 2
+    data = h.load(args.processed)
+    want_key = frozen.config["windows_key"]
+    if data.windows_key != want_key:
+        print(f"refused: {args.processed} has windows_key {data.windows_key}, the freeze used {want_key}")
+        return 2
+    model = frozen.detector
+    scores = model.score(data.windows[model.features].to_numpy(float))
+    roles = h.assign_roles(data.windows)
+    ctx = h.context(data, roles, gate_params(profile), budget=frozen.detector_bundle["budget_per_week"])
+    r = h.evaluate(scores, ctx, threshold=model.threshold)
+    failures = list(data.failures)
+    got = h.summary(r, failures)
+    logged = frozen.detector_bundle["metrics"]
+    print(f"frozen detector {frozen.detector_run_id}: {frozen.detector_bundle['detector']} at the "
+          f"{frozen.detector_bundle['threshold']['kind']} threshold {model.threshold:.4f}")
+    print(f"held-out FAR {r['far']:.2f} [{r['far lo']:.2f}, {r['far hi']:.2f}] a week "
+          f"({r['far with uncertain']:.2f} with the uncertain periods); leads "
+          + ", ".join(f"{ev} {h._fmt_lead(r[f'{ev} lead'])}" for ev in failures) + " h")
+    same = (got["held_out_far"] == logged["held_out_far"] and got["lead_h"] == logged["lead_h"]
+            and got["lead_h_median"] == logged["lead_h_median"])
+    if not same:
+        print("MISMATCH with the metrics logged at the freeze:\n  logged " + json.dumps(
+            {k: logged[k] for k in ("held_out_far", "lead_h")}) + "\n  now    " + json.dumps(
+            {k: got[k] for k in ("held_out_far", "lead_h")}))
+        return 1
+    print("matches the metrics logged at the freeze")
     return 0
 
 
@@ -246,10 +342,17 @@ def main(argv=None) -> int:
     p.add_argument("--init-quantile", type=float, default=0.98, help="SPOT's starting quantile")
     p.add_argument("--golden", help="selection.json to reproduce (the T27 done-check)")
     p.add_argument("--out", default=str(OUT))
+    p.add_argument("--save-bundle", help="write the detector bundle (detector_bundle_v1) to this folder; "
+                                         "the threshold follows the freeze rule when --threshold spot is given")
+    p.add_argument("--frozen", action="store_true", help="score with the frozen bundle in --config, no refit")
+    p.add_argument("--config", default=str(ROOT / "eval" / "config.yaml"))
+    p.add_argument("--run-id", help="with --frozen: refuse unless this is the pinned detector run (DET-08)")
     args = p.parse_args(argv)
     if not args.processed:
         fold_plan()
         return 0
+    if args.frozen:
+        return run_frozen(args)
     return run(args)
 
 

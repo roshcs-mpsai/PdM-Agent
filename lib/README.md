@@ -22,6 +22,7 @@ pip install -e lib     # once per environment; CI does the same
 | `mqtt` | `run_service()`: subscribe, handle, publish at QoS 1, flush on shutdown; `read_retained()` | — |
 | `spot` | `fit_spot()`, `threshold()`, `calibrate_q()`: the SPOT threshold from the GPD tail of healthy scores, q chosen at the budget | DET-05 |
 | `gate` | `gate_params()`, `gate_passes()`, `incidents()`, `gate()`, `lead_at_report()`: the persistence gate as pure functions | INC-01 to INC-04 |
+| `frozen` | `load_frozen()`, `DetectorModel`: the frozen bundles, verified against eval/config.yaml before anything scores with them | DET-08, NFR-05 |
 | `status` | NE 107 states, `r0_status()`, dashboard `marker()` colours | INC-07 stub |
 
 Two rules:
