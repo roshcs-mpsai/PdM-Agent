@@ -1,0 +1,31 @@
+# devices.example.yaml -- what services/south/cip.py polls (T23, G8 stretch; INT-07).
+# Copy to devices.yaml and fill in the bench. One entry per device on the
+# isolated EtherNet/IP segment; generic on purpose: no asset signal names.
+#
+# The poller chooses the CIP services itself (Get_Attributes_All for identity,
+# Get_Attribute_Single for the rest); this file only says which objects to read
+# and has no key for a service code. tests/test_cip.py loads this file.
+#
+# Values marked ASSUMED have not been checked against a drive. Confirm each one
+# with --once on the bench before trusting the events (services/south/CIP.md).
+
+devices:
+  - name: drive_1                # "device" in every device_event_v1; unique in this file
+    path: 192.168.1.20           # pycomm3 path: the device's IP address, or a route through a
+                                 # controller such as 192.168.1.10/bp/0/enet/192.168.1.20
+    routed: false                # true when the path goes through a controller (Unconnected Send)
+    poll_seconds: 5
+    timeout_seconds: 2           # no reply within this is a comms loss (one event until it returns)
+    read:
+      identity:                  # CIP Identity object, read with Get_Attributes_All
+        class: 0x01
+        instance: 1
+      logic_status:              # ASSUMED: the drive's input assembly; its first word is Logic Status
+        class: 0x04              #   Assembly object
+        instance: 2              #   ASSUMED instance number: look it up in the drive's manual
+        attribute: 3             #   assembly data
+        offset: 0                #   byte offset of the Logic Status word in the data
+      fault_queue:               # parameters b007-b009 [Fault 1-3 Code], through the Parameter object
+        class: 0x0F
+        instances: [7, 8, 9]     # parameter numbers, most recent fault first
+        attribute: 1             # parameter value

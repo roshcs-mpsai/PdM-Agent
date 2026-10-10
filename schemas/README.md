@@ -13,7 +13,7 @@ runs the services in process and puts every message they publish through its sch
 | incident_v1 | pdm/\<asset>/incidents | gate | services/gate/README.md |
 | status_v1 | pdm/\<asset>/status (retained), status_log | gate | services/gate/README.md |
 | drift_v1 | pdm/_sys/drift (retained), drift_alerts | drift | services/drift/README.md |
-| device_event_v1 | pdm/\<asset>/device, device_events | south (G8 stretch) | services/south/README.md |
+| device_event_v1 | pdm/\<asset>/device, device_events | south/cip.py (G8 stretch) | services/south/CIP.md |
 | tool_result_v1 | tool_results | MCP tool server | services/mcp_server/README.md |
 | brief_v1 | briefs | agent | below |
 
