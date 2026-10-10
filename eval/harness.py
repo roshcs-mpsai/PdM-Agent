@@ -378,9 +378,9 @@ def comparison_table(results: dict, info: dict, failures) -> pd.DataFrame:
             "with uncertain periods": round(r["far with uncertain"], 2),
             "failures caught": f"{caught} of {len(failures)}",
             "warned 2 / 24 / 72 h ahead": " / ".join(map(str, warned)),
-            "probable leaks alarmed": r.get("alarmed probable_leak"),
-            "load-held alarmed": r.get("alarmed load_held"),
-            "LPS periods alarmed": r.get("alarmed lps_heavy"),
+            # one column per uncertain-period tag in events.yaml, named from the file (CFG-03)
+            **{f"{key[len('alarmed '):]} periods alarmed": value for key, value in r.items()
+               if key.startswith("alarmed ")},
             "threshold percentile": round(r["threshold percentile"], 1),
         }
     table = pd.DataFrame(rows).T
