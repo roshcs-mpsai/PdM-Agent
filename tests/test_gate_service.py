@@ -293,3 +293,8 @@ def test_reopening_the_same_incident_is_a_no_op(store):
     _incident(store, "INC-y")
     assert lifecycle.open_incident(store, {"incident_id": "INC-y", "asset_id": "a"}, cause="replay") is False
     assert store.count("incident_events") == 1
+
+
+def test_the_opening_cause_reads_like_the_profile():
+    assert [gate_service.short_duration(n * 10**9) for n in (1800, 21600, 86400, 90, 0)] == \
+        ["30min", "6h", "1d", "90s", "0s"]

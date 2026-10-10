@@ -71,6 +71,15 @@ def _ns(text: str) -> int:
     return int(moment.timestamp()) * 10**9 + moment.microsecond * 1000
 
 
+def short_duration(ns: int) -> str:
+    """30 min -> '30min', 6 h -> '6h': the profile's way of writing a duration, for text a person reads."""
+    seconds = ns // 10**9
+    for unit, size in (("d", 86_400), ("h", 3_600), ("min", 60)):
+        if seconds and seconds % size == 0:
+            return f"{seconds // size}{unit}"
+    return f"{seconds}s"
+
+
 def incident_id(asset: str, opened_ns: int) -> str:
     """Deterministic from stream time, so a replay into the same store opens the same ids."""
     return f"INC-{asset}-" + dt.datetime.fromtimestamp(opened_ns / 1e9, tz=dt.timezone.utc).strftime("%Y%m%dT%H%MZ")
@@ -221,7 +230,7 @@ class GateService:
         opened = _iso_ns(event.at_ns)
         iid = incident_id(self.asset, event.at_ns)
         cause = (f"gate passed: {event.alerting} of {event.present} windows over the threshold in the last "
-                 f"{self.params.as_dict()['span']}")
+                 f"{short_duration(self.params.span_ns)}")
         self.incident = {"incident_id": iid, "opened_at": opened}
         self.counts["opened"] += 1
         self.m.incidents_opened_total.labels(asset=self.asset).inc()
