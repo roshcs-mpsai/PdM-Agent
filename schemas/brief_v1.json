@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdm-agent.local/schemas/brief_v1.json",
+  "title": "brief_v1",
+  "description": "The agent's incident brief (FRD section 8, BRF-01 to BRF-07). Every claim cites tool results of this incident; the prognosis is cited, never retyped.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "brief_v1"
+    },
+    "brief_id": {
+      "type": "string",
+      "pattern": "^B-"
+    },
+    "incident_id": {
+      "type": "string"
+    },
+    "asset_id": {
+      "type": "string"
+    },
+    "evidence_state": {
+      "enum": [
+        "sufficient",
+        "insufficient",
+        "budget_exhausted"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1200
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/hypothesis"
+      }
+    },
+    "prognosis": {
+      "type": "object",
+      "properties": {
+        "cites": {
+          "$ref": "#/$defs/cites"
+        }
+      },
+      "required": [
+        "cites"
+      ],
+      "additionalProperties": false
+    },
+    "recommended_action": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "inspection",
+            "sensor_check",
+            "data_quality_check",
+            "monitor"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cites": {
+          "$ref": "#/$defs/cites"
+        }
+      },
+      "required": [
+        "type",
+        "text",
+        "cites"
+      ],
+      "additionalProperties": false
+    },
+    "work_order": {
+      "$ref": "#/$defs/work_order"
+    },
+    "checks_run": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^R-[0-9A-Za-z]+-[0-9]+$"
+      }
+    },
+    "versions": {
+      "type": "object",
+      "properties": {
+        "llm": {
+          "type": "string"
+        },
+        "detector_run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "survival_run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skills": {
+          "type": "object"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "llm",
+        "skills",
+        "profile"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "brief_id",
+    "incident_id",
+    "asset_id",
+    "evidence_state",
+    "summary",
+    "hypotheses",
+    "prognosis",
+    "recommended_action",
+    "work_order",
+    "checks_run",
+    "versions"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "cites": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^R-[0-9A-Za-z]+-[0-9]+$"
+      },
+      "minItems": 1
+    },
+    "claim": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cites": {
+          "$ref": "#/$defs/cites"
+        }
+      },
+      "required": [
+        "text",
+        "cites"
+      ],
+      "additionalProperties": false
+    },
+    "hypothesis": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^H[0-9]+$"
+        },
+        "category": {
+          "enum": [
+            "process",
+            "instrumentation",
+            "device",
+            "data_quality"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "likelihood": {
+          "enum": [
+            "likely",
+            "possible",
+            "unlikely"
+          ]
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/claim"
+          },
+          "minItems": 1
+        },
+        "against": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/claim"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "statement",
+        "likelihood",
+        "claims"
+      ],
+      "additionalProperties": false
+    },
+    "work_order": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset": {
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "urgent"
+          ]
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "safety_notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "status": {
+          "const": "draft"
+        }
+      },
+      "required": [
+        "title",
+        "priority",
+        "tasks",
+        "safety_notes"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

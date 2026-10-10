@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdm-agent.local/schemas/drift_v1.json",
+  "title": "drift_v1",
+  "description": "One drift check over the last window of stream time against the healthy reference, per signal and regime (OPS-04).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "drift_v1"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "window": {
+      "type": "string"
+    },
+    "alert": {
+      "type": "boolean"
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "signal": {
+            "type": "string"
+          },
+          "regime": {
+            "type": "string"
+          },
+          "distance": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "alert": {
+            "type": "boolean"
+          },
+          "n": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "signal",
+          "distance",
+          "threshold",
+          "alert"
+        ]
+      }
+    },
+    "candidate": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "profile_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema",
+    "asset",
+    "ts",
+    "alert",
+    "signals"
+  ],
+  "additionalProperties": false
+}

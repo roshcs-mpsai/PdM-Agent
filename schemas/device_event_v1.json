@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdm-agent.local/schemas/device_event_v1.json",
+  "title": "device_event_v1",
+  "description": "A decoded device status read from a drive or controller (G8 stretch, INT-07).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "device_event_v1"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "device": {
+      "type": "string"
+    },
+    "object": {
+      "type": "string"
+    },
+    "attribute": {
+      "type": "string"
+    },
+    "raw_value": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "decoded": {
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "warning",
+        "fault"
+      ]
+    },
+    "ne107_class": {
+      "enum": [
+        "good",
+        "maintenance_required",
+        "out_of_specification",
+        "function_check",
+        "failure"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "asset",
+    "ts",
+    "device",
+    "object",
+    "attribute",
+    "raw_value",
+    "decoded",
+    "severity"
+  ],
+  "additionalProperties": false
+}

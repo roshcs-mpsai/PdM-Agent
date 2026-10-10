@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdm-agent.local/schemas/tool_result_v1.json",
+  "title": "tool_result_v1",
+  "description": "One tool result as the agent sees it and the store keeps it, before the model reads it (AGT-03, AGT-04).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "tool_result_v1"
+    },
+    "result_id": {
+      "type": "string",
+      "pattern": "^R-[0-9A-Za-z]+-[0-9]+$"
+    },
+    "incident_id": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    },
+    "arguments": {
+      "type": "object"
+    },
+    "as_of": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "output": {},
+    "created_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    }
+  },
+  "required": [
+    "schema",
+    "result_id",
+    "incident_id",
+    "tool",
+    "arguments",
+    "as_of",
+    "output"
+  ],
+  "additionalProperties": false
+}
