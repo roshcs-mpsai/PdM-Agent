@@ -15,6 +15,7 @@ lands (build order and owners are in the construction plan).
 | dashboard | Streamlit operator dashboard + approval store | R0 stub, R2 |
 | opcua_north | Northbound OPC UA server, NE 107 | R2 |
 | connector | REST work-order connector | R2 |
+| south | Southbound adapters: Sparkplug B and OPC UA client to telemetry_json_v1, the simulated SCADA; read-only CIP client (G8 stretch) | R2; R4 stretch |
 
 Rule: nothing in here names a MetroPT signal — asset facts come from
 `profiles/` (enforced by `tests/test_profiles.py`).

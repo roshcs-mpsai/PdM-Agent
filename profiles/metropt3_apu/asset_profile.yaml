@@ -15,7 +15,8 @@
 #       and the drift windows from the FRD/HLD (sections 4.4, 4.10), and the
 #       consistency checks as structured entries the registry reads.
 #       Oct 10: the checks registry C1-C11 (checks/apu_metropt3), thresholds
-#       from tools/calibrate_checks.py on healthy operation.
+#       from tools/calibrate_checks.py on healthy operation; the south section
+#       mapping the simulated SCADA's OPC UA nodes and Sparkplug metrics.
 
 schema_version: "0.3"
 
@@ -242,3 +243,44 @@ drift:                         # OPS-04 (FRD 4.10): Wasserstein distance per reg
   window: 24h                  # the last 24 simulated hours ...
   every: 6h                    # ... against the healthy reference, every 6 simulated hours
   signals: [TP2, TP3, H1, Oil_temperature, Motor_current]
+
+south:                         # ING-14: southbound sources -> profile signals (services/south)
+  opcua:
+    endpoint: "opc.tcp://localhost:4841/scada-sim/"   # the simulated SCADA (4840 is opcua_north)
+    publishing_interval: 10s                          # one record per interval of source time
+    tags:                                             # OPC UA node id -> signal
+      "ns=2;s=APU.TP2": TP2
+      "ns=2;s=APU.TP3": TP3
+      "ns=2;s=APU.H1": H1
+      "ns=2;s=APU.DV_pressure": DV_pressure
+      "ns=2;s=APU.Reservoirs": Reservoirs
+      "ns=2;s=APU.Oil_temperature": Oil_temperature
+      "ns=2;s=APU.Motor_current": Motor_current
+      "ns=2;s=APU.COMP": COMP
+      "ns=2;s=APU.DV_eletric": DV_eletric
+      "ns=2;s=APU.Towers": Towers
+      "ns=2;s=APU.MPG": MPG
+      "ns=2;s=APU.LPS": LPS
+      "ns=2;s=APU.Pressure_switch": Pressure_switch
+      "ns=2;s=APU.Oil_level": Oil_level
+      "ns=2;s=APU.Caudal_impulses": Caudal_impulses
+  sparkplug:
+    group: pdm_testbed
+    edge_node: scada_sim
+    device: apu
+    metrics:                                          # Sparkplug metric name -> signal
+      APU/TP2: TP2
+      APU/TP3: TP3
+      APU/H1: H1
+      APU/DV_pressure: DV_pressure
+      APU/Reservoirs: Reservoirs
+      APU/Oil_temperature: Oil_temperature
+      APU/Motor_current: Motor_current
+      APU/COMP: COMP
+      APU/DV_eletric: DV_eletric
+      APU/Towers: Towers
+      APU/MPG: MPG
+      APU/LPS: LPS
+      APU/Pressure_switch: Pressure_switch
+      APU/Oil_level: Oil_level
+      APU/Caudal_impulses: Caudal_impulses
