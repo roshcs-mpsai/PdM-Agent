@@ -9,9 +9,11 @@ store. Messages are delivered in publication order, depth first, so a window's s
 reaches the gate before the next window is published, exactly the order the broker
 gives one consumer at QoS 1. Retained topics keep their last message, as Mosquitto does.
 
-Anything else -- the agent, the API's connector, the OPC UA server, the drift job --
-joins with ``subscribe(topic, handler)``; a handler takes a payload and returns
-Outs, which go back on the bus.
+Anything else -- the API's connector, the OPC UA server, the drift job -- joins with
+``subscribe(topic, handler)``; a handler takes a payload and returns Outs, which go back
+on the bus. ``attach_agent(process)`` runs the agent on each incident the gate opens,
+synchronously, before the next window: the brief is in the store when the gate computes
+the next status, as it would be a few seconds later in the stack.
 
 ``Pipeline.replay`` uses the replayer's own ``replay`` (with fault injection and its
 manifest), and ingest computes windows once an hour of data has arrived
@@ -118,6 +120,18 @@ class Pipeline:
 
     def subscribe(self, topic: str, handler) -> None:
         self.bus.subscribe(topic, handler)
+
+    def attach_agent(self, process: Callable[[str], dict]) -> None:
+        """Run ``process(incident_id)`` (services/agent AgentService.process, or a Runner's run)
+        on every incident the gate opens; the states it returns are kept in ``agent_runs``."""
+        self.agent_runs: list[dict] = []
+
+        def on_incident(payload) -> list:
+            doc = json.loads(payload)
+            if doc.get("event") == "opened" and doc.get("incident_id"):
+                self.agent_runs.append(process(doc["incident_id"]))
+            return []
+        self.bus.subscribe(self.topics["incidents"], on_incident)
 
     def feed(self, payloads: Iterable[str]) -> None:
         for p in payloads:

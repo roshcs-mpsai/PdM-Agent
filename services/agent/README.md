@@ -12,8 +12,10 @@ python services/agent/agent.py --profile ... --study INC-... --arm retrieval_onl
 python services/agent/agent.py --profile ... --scripted services/agent/scripts/dry_run.json --once INC-...
 ```
 
-Needs `ANTHROPIC_API_KEY` unless `--scripted` replays fixed answers (a dry run: the
-brief says no model read the evidence). With `--api` the agent writes only through the
+Needs `ANTHROPIC_API_KEY`, unless `--scripted` replays fixed answers (a dry run: the
+brief says no model read the evidence) or `--policy rules` runs the triage skill's rules
+as code instead of a model (eval/policy.py; its briefs follow the checks, so a demo
+without a key still shows different briefs for different incidents). With `--api` the agent writes only through the
 HTTP API, with `PDM_TOKEN_AGENT`; with `--tools` it reaches the tools over MCP with the
 same token. Without them it writes to the store and runs the tool code in process.
 Metrics on port 9106.

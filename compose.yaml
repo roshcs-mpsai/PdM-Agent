@@ -252,7 +252,8 @@ services:
   agent:                             # writes only through the api; reads only through the tools
     <<: *python
     # PDM_AGENT_ARGS in .env adds arguments. Without an API key:
-    #   PDM_AGENT_ARGS="--scripted services/agent/scripts/dry_run.json"   (a dry run, no model)
+    #   PDM_AGENT_ARGS="--policy rules"       (the triage skill's rules as code, eval/policy.py)
+    #   PDM_AGENT_ARGS="--scripted services/agent/scripts/dry_run.json"   (a fixed script)
     command: >-
       python services/agent/agent.py --profile profiles/metropt3_apu/asset_profile.yaml
       --api http://api:8000 --tools http://mcp_server:8765/mcp ${PDM_AGENT_ARGS:-}

@@ -196,6 +196,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="the MCP tool server's URL (…/mcp); default: the tool code in this process")
     p.add_argument("--arm", choices=("full", "retrieval_only"), default=None)
     p.add_argument("--scripted", default=None, help="replay fixed model answers from this JSON file")
+    p.add_argument("--policy", choices=("rules",), default=None,
+                   help="no model: the triage skill's rules as code (eval/policy.py), for a demo without a key")
     p.add_argument("--once", metavar="INCIDENT_ID", default=None, help="diagnose one incident and exit")
     p.add_argument("--study", metavar="INCIDENT_ID", default=None,
                    help="write a study brief for one incident (no claim, no lifecycle move) and exit")
@@ -213,9 +215,15 @@ def main(argv=None) -> int:
     profile = load_profile(args.profile)
     token = os.environ.get("PDM_TOKEN_AGENT")
     try:
-        model = make_model(cfg, args.scripted)
+        if args.policy == "rules":
+            sys.path.insert(0, str(ROOT / "eval"))
+            from policy import RulesModel
+            from pdm_common.profile import analog_names
+            model = RulesModel(signals=analog_names(profile))
+        else:
+            model = make_model(cfg, args.scripted)
     except llm.ModelError as exc:
-        raise SystemExit(f"agent: {exc}; set it, or use --scripted for a dry run")
+        raise SystemExit(f"agent: {exc}; set it, or use --scripted or --policy rules for a run without a key")
     survival_run = None
     if args.api:
         sink = sinks.ApiSink(args.api, token)

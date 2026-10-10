@@ -75,7 +75,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"     # one fresh val
 | `PDM_TOKEN_REVIEWER`, `PDM_TOKEN_ENGINEER`, `PDM_TOKEN_OPERATOR`, `PDM_TOKEN_EVALUATOR` | api | optional role tokens |
 | `PDM_STUDY_SALT` | api | 16 characters or more; the study endpoints (T34) answer 503 without it |
 | `ANTHROPIC_API_KEY` | agent | the model; without it, set `PDM_AGENT_ARGS` |
-| `PDM_AGENT_ARGS` | agent | `"--scripted services/agent/scripts/dry_run.json"` (quoted) runs the dry-run script, no model |
+| `PDM_AGENT_ARGS` | agent | `"--policy rules"` runs the triage rules as code (eval/policy.py), no model; `"--scripted services/agent/scripts/dry_run.json"` (quoted) runs a fixed script |
 | `PDM_NORTH_BIND` | api, dashboard, workorder-sim | `0.0.0.0` opens them to the LAN |
 | `PDM_LOG_LEVEL` | every Python service | `INFO` by default; `DEBUG` for more |
 | `COMPOSE_FILE` | docker compose | the secure broker, step 2 |
@@ -237,7 +237,7 @@ over OPC UA. `tools/verify_local.sh --journey-a` runs the same steps, approving 
 | What you see | Likely cause | What to do |
 |---|---|---|
 | `required variable ... is missing a value` | `.env` lacks it | set it (first-time setup, step 1) |
-| agent restarting; its log says to set the key or use `--scripted` | no `ANTHROPIC_API_KEY` | set the key, or `PDM_AGENT_ARGS` for the dry run |
+| agent restarting; its log says to set the key or use `--scripted` or `--policy rules` | no `ANTHROPIC_API_KEY` | set the key, or `PDM_AGENT_ARGS` for a run without a model |
 | api exits: a token too short, or the same token twice | the token rules | fix `.env`, `docker compose up -d` |
 | detector or prognostics refuses to start: the freeze does not match | the profile, events, features or a bundle changed, often line endings from a Windows checkout | `git status`; check out again with LF line endings |
 | a service logs `broker refused the connection: Not authorized` | secure broker, and its password is missing or `passwd` is stale | `python tools/broker_users.py --check`, then `docker compose restart mosquitto` |

@@ -1,0 +1,12 @@
+# Injected sensor faults for the scripted incidents S13 and S14 (eval/incidents.yaml, T28) and
+# Journey C (tests/test_journeys.py). faults_v1, applied by the replayer (services/replayer).
+# Times are the CSV's own (UTC). Both sit between the gate's incidents of Jun 10 and Jul 8, 2020,
+# in data the EDA found healthy.
+schema: faults_v1
+faults:
+  # S13: the panel pressure sensor reads 2 bar low for six hours while the reservoirs read
+  # true. The divergence check (C9) should fail: an instrument, not the process.
+  - {kind: offset, signal: TP3, value: -2.0, from: 2020-07-02T08:00:00, to: 2020-07-02T14:00:00}
+  # S14: the oil temperature sensor reads 25 degC high for six hours. The oil-temperature
+  # signature (C6) fails alone, with no continuous load or leak signature to support it.
+  - {kind: offset, signal: Oil_temperature, value: 25.0, from: 2020-07-04T08:00:00, to: 2020-07-04T14:00:00}
