@@ -151,12 +151,16 @@ class Ingest:
 
     ``store``: a pdm_common.store.Store for telemetry, windows and quarantine
     rows (None: nothing stored). ``spec``: the feature declarations (default:
-    the profile's features file next to ``profile_path``).
+    the profile's features file next to ``profile_path``). ``compute_every``:
+    for replays faster than real time, compute windows every so many accepted
+    records instead of as soon as each is final; the windows are the same
+    (tests/test_stream.py), only released in batches.
     """
 
     def __init__(self, profile: dict, profile_sha256: str,
                  quarantine_path: Optional[Path] = None, *, spec: Optional[FeatureSpec] = None,
-                 profile_path: Optional[Path] = None, store=None, telemetry_batch: int = 360):
+                 profile_path: Optional[Path] = None, store=None, telemetry_batch: int = 360,
+                 compute_every: Optional[int] = None):
         self.profile = profile
         self.asset = profile["asset"]["id"]
         self.windows_topic = profile["topics"]["windows"]
@@ -174,6 +178,7 @@ class Ingest:
         self.quarantine_path = Path(quarantine_path) if quarantine_path else None
         self.store = store
         self.telemetry_batch = telemetry_batch
+        self.compute_every = compute_every
         self._telemetry_rows: list[dict] = []
         self._flagged: deque = deque()          # (ts, {signal: value}) of recent out-of-range records
         self.counts = Counter({"in": 0, "accepted": 0, "quarantined": 0, "lost": 0, "out_of_range": 0,
@@ -281,7 +286,11 @@ class Ingest:
             log.warning("out of range at %s: %s", iso_utc(ts), flags)
         self._telemetry_rows.append({"asset_id": self.asset, "ts": ts, "seq": seq, "signals": values,
                                      "out_of_range": flags or None})
-        windows = self.stream.add(ts, values, excluded=flags.keys())
+        self.stream.append(ts, values, excluded=flags.keys())
+        if self.compute_every is None:
+            windows = self.stream.compute() if self.stream._ready_until() is not None else []
+        else:                                 # a fast replay: same windows, released in batches
+            windows = self.stream.compute() if self.counts["accepted"] % self.compute_every == 0 else []
         if windows or len(self._telemetry_rows) >= self.telemetry_batch:
             self._write_telemetry()
         return outs + self._publish(windows)
