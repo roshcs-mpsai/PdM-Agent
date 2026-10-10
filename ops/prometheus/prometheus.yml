@@ -1,0 +1,62 @@
+# Prometheus for the PdM-Agent compose stack (OPS-02, R3.5; T24).
+# One scrape job per service, named as the compose service, at the port in
+# pdm_common.metrics.PORTS. Each service serves /metrics and /health there
+# (pdm_common.metrics.serve). A service that is not running yet shows up = 0.
+# Not run in the build sandbox: check with `promtool check config prometheus.yml`.
+
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 5s
+
+rule_files:
+  - alerts.yml                    # relative to this file; mount ops/prometheus as /etc/prometheus
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: ingest
+    static_configs:
+      - targets: ["ingest:9101"]
+
+  - job_name: detector
+    static_configs:
+      - targets: ["detector:9102"]
+
+  - job_name: gate
+    static_configs:
+      - targets: ["gate:9103"]
+
+  - job_name: prognostics
+    static_configs:
+      - targets: ["prognostics:9104"]
+
+  - job_name: mcp_server
+    static_configs:
+      - targets: ["mcp_server:9105"]
+
+  - job_name: agent
+    static_configs:
+      - targets: ["agent:9106"]
+
+  - job_name: api
+    static_configs:
+      - targets: ["api:9107"]
+
+  - job_name: connector
+    static_configs:
+      - targets: ["connector:9108"]
+
+  - job_name: opcua_north
+    static_configs:
+      - targets: ["opcua_north:9109"]
+
+  - job_name: drift
+    static_configs:
+      - targets: ["drift:9110"]
+
+  - job_name: south
+    static_configs:
+      - targets: ["south:9111"]

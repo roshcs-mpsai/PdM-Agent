@@ -31,6 +31,9 @@ pip install -e lib     # once per environment; CI does the same
 | `schemas` | `validate(name, doc)`, `check()`: the JSON Schemas in schemas/ for every payload, tool result and brief | FRD 9 |
 | `brief` | `validate_brief()` (citations, stored prognosis, numbers within rounding, insufficient-evidence rules), `fallback_brief()` | BRF-01 to BRF-07 |
 | `checks` | `Evidence` (what an alarm's checks may read: the grid before the opening, the opening window, the gaps), `CheckResult`, `load_registry()`: the shared side of the per-asset checks in checks/<asset>/ | AGT-05 |
+| `metrics` | `service_metrics()`, `serve()`, `Registry`, `Counter`, `Gauge`, `Histogram`: Prometheus text format without a client library; the catalogue of every metric the dashboards read | OPS-02 |
+| `logs` | `setup()`, `context()`: one JSON object per log line with incident_id, trace_id and result ids (`PDM_LOG_FORMAT=text` for a terminal) | OPS-01 |
+| `tracing` | `configure()`, `incident_trace()`, `tool_call()`, `span()`: OpenTelemetry spans when the SDK is installed, no-ops otherwise | OPS-03 |
 | `status` | `ne107()`: the NE 107 status and its causes from score, gate, incident, diagnosis, prognosis, drift and data; `marker()` colours | INC-07, INT-03 |
 
 Two rules:

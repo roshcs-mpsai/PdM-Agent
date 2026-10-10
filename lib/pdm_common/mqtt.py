@@ -7,6 +7,11 @@ returns at QoS 1, and on SIGINT/SIGTERM publish whatever ``on_stop`` returns
 before disconnecting. Keeping the handlers free of MQTT is what lets the
 tests drive every service without a broker.
 
+Every service also gets the standard metrics (pdm_common.metrics: messages in
+and out per topic, handler time and errors, ``pdm_up``) on its port in
+``metrics.PORTS`` (``PDM_METRICS_PORT`` overrides, ``off`` disables), with
+``/health`` answering 503 while the broker connection is down.
+
 Broker authentication, ACLs and persistent sessions arrive in R3 hardening.
 """
 from __future__ import annotations
@@ -57,8 +62,13 @@ def run_service(
     counts it reports are final. If the broker has gone, the final messages
     are logged as lost and the service still exits cleanly.
     """
+    from pdm_common import metrics
+
     log = logging.getLogger(name)
     client = _client(f"pdm-{name}")
+    M = metrics.service_metrics(name)
+    M.set_up(False)
+    server = metrics.serve(metrics.REGISTRY, metrics.port_for(name), service=name, health=client.is_connected)
     lock = threading.Lock()          # handlers and on_stop never run concurrently
     stop = threading.Event()
     closing = threading.Event()
@@ -70,7 +80,12 @@ def run_service(
             return
         for topic in handlers:
             client.subscribe(topic, qos=qos)
+        M.set_up(True)
         log.info("connected to %s:%s; subscribed to %s", host, port, ", ".join(handlers))
+
+    def on_disconnect(client, userdata, flags, reason_code, properties):
+        M.set_up(False)
+        log.warning("disconnected from the broker: %s", reason_code)
 
     def on_message(client, userdata, msg):
         handler = handlers.get(msg.topic)
@@ -81,14 +96,17 @@ def run_service(
                 if closing.is_set():
                     unprocessed[0] += 1
                     return
-                outs = list(handler(msg.payload))
+                with M.handling(msg.topic):
+                    outs = list(handler(msg.payload))
         except Exception:                     # a bad message must not stop the service
             log.exception("handler failed on a message from %s", msg.topic)
             return
         for out in outs:
             client.publish(out.topic, out.payload, qos=qos, retain=out.retain)
+            M.messages_out_total.labels(topic=out.topic).inc()
 
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
@@ -111,9 +129,11 @@ def run_service(
                         outs = list(fn())
                     except Exception:
                         log.exception("tick failed")
+                        M.handler_errors_total.labels(topic="tick").inc()
                         outs = []
                 for out in outs:
                     client.publish(out.topic, out.payload, qos=qos, retain=out.retain)
+                    M.messages_out_total.labels(topic=out.topic).inc()
     finally:
         with lock:
             closing.set()                     # from here on, messages are not handled
@@ -128,6 +148,9 @@ def run_service(
                 log.error("final message on %s was not published: %s", out.topic, exc)
         client.loop_stop()
         client.disconnect()
+        M.set_up(False)
+        if server is not None:
+            server.close()
         if unprocessed[0]:
             log.info("%d message(s) arrived during shutdown and were not handled", unprocessed[0])
 

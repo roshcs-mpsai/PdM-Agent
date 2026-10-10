@@ -41,6 +41,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 
 from pdm_common import incidents as lifecycle  # noqa: E402
+from pdm_common import logs, metrics  # noqa: E402
 from pdm_common.asof import evidence_asof  # noqa: E402
 from pdm_common.checks import Evidence, load_registry  # noqa: E402
 from pdm_common.events import load_events  # noqa: E402
@@ -48,7 +49,7 @@ from pdm_common.gate import GateEvent, StreamingGate, gate_params  # noqa: E402
 from pdm_common.hashing import canonical_json  # noqa: E402
 from pdm_common.mqtt import Out, run_service  # noqa: E402
 from pdm_common.profile import ProfileError, events_file, load_profile, profile_hash  # noqa: E402
-from pdm_common.status import StatusInputs, ne107  # noqa: E402
+from pdm_common.status import NE107_STATES, StatusInputs, ne107  # noqa: E402
 from pdm_common.timeutil import iso_utc, parse_duration, to_utc  # noqa: E402
 
 log = logging.getLogger("gate")
@@ -101,6 +102,12 @@ class GateService:
         self.incident: Optional[dict] = None          # the latest incident this gate opened
         self.status: Optional[tuple[str, tuple]] = None
         self.counts = {"scores": 0, "opened": 0, "attached": 0, "suppressed": 0, "closed": 0, "status_changes": 0}
+        self.m = metrics.service_metrics("gate")
+        for decision in ("open", "attach", "suppress", "close"):
+            self.m.gate_decisions_total.labels(asset=self.asset, decision=decision)
+        for state in NE107_STATES:
+            self.m.ne107_status.labels(asset=self.asset, status=state).set(0)
+            self.m.ne107_status_changes_total.labels(asset=self.asset, to=state)
 
     # -- inputs -------------------------------------------------------------------------------
     def handle_window(self, payload) -> list[Out]:
@@ -177,6 +184,7 @@ class GateService:
             "trajectory": [{"window_end": _iso_ns(t), "score": sc, "alert": a} for t, sc, a in event.trajectory]})
 
     def _on_event(self, event: GateEvent, score: dict) -> list[Out]:
+        self.m.gate_decisions_total.labels(asset=self.asset, decision=event.kind).inc()
         if event.kind == "open":
             return self._open(event, score)
         current = self.incident["incident_id"] if self.incident else None
@@ -216,6 +224,7 @@ class GateService:
                  f"{self.params.as_dict()['span']}")
         self.incident = {"incident_id": iid, "opened_at": opened}
         self.counts["opened"] += 1
+        self.m.incidents_opened_total.labels(asset=self.asset).inc()
         evidence = self._evidence(opened)
         if self.store is not None:
             created = lifecycle.open_incident(self.store, {
@@ -227,7 +236,7 @@ class GateService:
             if not created:
                 log.info("incident %s already in the store (a replay); not opened again", iid)
         self._log(event, iid)
-        log.info("incident %s opened at %s: %s", iid, opened, cause)
+        log.info("incident %s opened at %s: %s", iid, opened, cause, extra={"incident_id": iid, "asset": self.asset})
         return [self._incident_message("opened", event, iid, cause=cause, evidence=evidence)]
 
     def _incident_message(self, kind: str, event: GateEvent, iid: Optional[str], **extra) -> Out:
@@ -281,8 +290,11 @@ class GateService:
                "episode_open": self.gate.episode_open, "prognosis": horizons or None,
                "profile_sha256": self.profile_sha256}
         key = (status, tuple(causes))
+        for state in NE107_STATES:
+            self.m.ne107_status.labels(asset=self.asset, status=state).set(int(state == status))
         if self.status is None or self.status[0] != status:
             self.counts["status_changes"] += 1
+            self.m.ne107_status_changes_total.labels(asset=self.asset, to=status).inc()
             if self.store is not None:
                 self.store.insert("status_log", {"asset_id": self.asset, "at": ts, "from_status":
                                                  self.status[0] if self.status else None, "to_status": status,
@@ -309,7 +321,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    logs.setup("gate")
     try:
         profile = load_profile(args.profile)
     except ProfileError as exc:

@@ -38,7 +38,7 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
-from pdm_common import catalogue
+from pdm_common import catalogue, logs, metrics
 from pdm_common.features import FeatureSpec, features_file, load_feature_spec
 from pdm_common.frozen import features_sha256
 from pdm_common.hashing import canonical_json, sha256_file
@@ -185,6 +185,11 @@ class Ingest:
         self._last_ts: Optional[dt.datetime] = None
         self._last_seq: Optional[int] = None
         self.replays = 1
+        self.m = metrics.service_metrics("ingest")
+        for code in ERROR_CODES:              # every series exists from the start, so rate() sees the first one
+            self.m.records_quarantined_total.labels(asset=self.asset, code=code)
+        self.m.queue_depth.labels(queue="stream_buffer").set_function(lambda: self.stream.buffered)
+        self.m.queue_depth.labels(queue="telemetry_batch").set_function(lambda: len(self._telemetry_rows))
 
     # -- validation -------------------------------------------------------
     def _parse(self, payload: bytes | str):
@@ -225,6 +230,7 @@ class Ingest:
             self.replays += 1
         if self._last_seq is not None and seq > self._last_seq + 1:
             self.counts["lost"] += seq - self._last_seq - 1
+            self.m.records_lost_total.labels(asset=self.asset).inc(seq - self._last_seq - 1)
         if self._last_seq is None or seq > self._last_seq:
             self._last_seq = seq
         return outs
@@ -232,6 +238,7 @@ class Ingest:
     def _quarantine(self, payload: bytes | str, err: Rejected) -> None:
         self.counts["quarantined"] += 1
         self.by_code[err.code] += 1
+        self.m.records_quarantined_total.labels(asset=self.asset, code=err.code).inc()
         raw = payload.decode("utf-8", "replace") if isinstance(payload, bytes) else payload
         received = iso_utc(dt.datetime.now(dt.timezone.utc))      # wall clock: logs only
         record = {"received_at": received, "asset": self.asset, "error_code": err.code,
@@ -248,6 +255,7 @@ class Ingest:
     def handle(self, payload: bytes | str) -> list[Out]:
         """Every message ends accepted or quarantined, so the counts balance."""
         self.counts["in"] += 1
+        self.m.records_in_total.labels(asset=self.asset).inc()
         outs = self._track_seq(payload)
         try:
             seq, ts, values = self._parse(payload)
@@ -263,9 +271,11 @@ class Ingest:
         self.first_ts = self.first_ts or ts
         self.last_ts = ts
         self.counts["accepted"] += 1
+        self.m.records_accepted_total.labels(asset=self.asset).inc()
         flags = out_of_range(values, self.ranges)
         if flags:
             self.counts["out_of_range"] += 1
+            self.m.records_out_of_range_total.labels(asset=self.asset).inc()
             self.flagged_by_signal.update(flags.keys())
             self._flagged.append((ts, flags))
             log.warning("out of range at %s: %s", iso_utc(ts), flags)
@@ -320,8 +330,10 @@ class Ingest:
             self.counts["windows"] += 1
             if not w.complete:
                 self.counts["dropped"] += 1
+                self.m.windows_dropped_total.labels(asset=self.asset).inc()
                 continue
             self.counts["complete"] += 1
+            self.m.windows_published_total.labels(asset=self.asset).inc()
             payload = self.window_payload(w)
             outs.append(Out(self.windows_topic, canonical_json(payload)))
             rows.append({"asset_id": self.asset, "window_start": payload["start"], "window_end": payload["end"],
@@ -384,7 +396,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    logs.setup("ingest")
     try:
         profile = load_profile(args.profile)
     except ProfileError as exc:

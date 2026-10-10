@@ -35,6 +35,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Optional
 
+from pdm_common import logs, metrics
 from pdm_common.features import features_file
 from pdm_common.frozen import Frozen, FrozenError, load_frozen
 from pdm_common.hashing import canonical_json
@@ -64,10 +65,14 @@ class Detector:
         self.store = store
         self.counts = Counter({"windows": 0, "scored": 0, "refused": 0, "alerts": 0})
         self.refused_by: Counter = Counter()
+        self.m = metrics.service_metrics("detector")
+        for reason in ("bad_json", "wrong_schema", "unknown_asset", "features_changed", "incomplete"):
+            self.m.windows_refused_total.labels(asset=self.asset, reason=reason)
 
     def _refuse(self, reason: str, detail: str) -> list[Out]:
         self.counts["refused"] += 1
         self.refused_by[reason] += 1
+        self.m.windows_refused_total.labels(asset=self.asset, reason=reason).inc()
         log.warning("refused window (%s): %s", reason, detail)
         return []
 
@@ -113,18 +118,25 @@ class Detector:
                                                     f"frozen {self.features_sha256[:12]}")
         if not isinstance(window.get("features"), dict) or "start" not in window or "end" not in window:
             return self._refuse("incomplete", "no features or bounds")
-        doc = self.score(window)
+        with self.m.scoring_seconds.labels(asset=self.asset).time():
+            doc = self.score(window)
+            if self.store is not None:
+                self.store.insert("scores", {
+                    "asset_id": self.asset, "window_start": doc["window_start"], "window_end": doc["window_end"],
+                    "score": doc["score"], "errors": doc["errors"], "threshold": doc["threshold"],
+                    "alert": doc["alert"], "detector_run_id": self.run_id, "profile_sha256": self.profile_sha256},
+                    ignore_conflict=True)
+            out = Out(self.scores_topic, canonical_json(doc))
         self.counts["scored"] += 1
         self.counts["alerts"] += int(doc["alert"])
-        if self.store is not None:
-            self.store.insert("scores", {
-                "asset_id": self.asset, "window_start": doc["window_start"], "window_end": doc["window_end"],
-                "score": doc["score"], "errors": doc["errors"], "threshold": doc["threshold"],
-                "alert": doc["alert"], "detector_run_id": self.run_id, "profile_sha256": self.profile_sha256},
-                ignore_conflict=True)
+        self.m.windows_scored_total.labels(asset=self.asset).inc()
+        if doc["alert"]:
+            self.m.alerts_total.labels(asset=self.asset).inc()
         log.info("score %s %.2f / %.2f (top %s) alert=%s", doc["window_end"], doc["score"], doc["threshold"],
-                 doc["top"][0][0] if doc["top"] else "-", doc["alert"])
-        return [Out(self.scores_topic, canonical_json(doc))]
+                 doc["top"][0][0] if doc["top"] else "-", doc["alert"],
+                 extra={"asset": self.asset, "window_end": doc["window_end"], "score": doc["score"],
+                        "alert": doc["alert"]})
+        return [out]
 
     def report(self) -> dict:
         return dict(self.counts, asset=self.asset, detector_run_id=self.run_id,
@@ -152,7 +164,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    logs.setup("detector")
     try:
         profile = load_profile(args.profile)
         frozen = load_for_profile(profile, args.profile, args.config, args.run_id)

@@ -1,0 +1,66 @@
+# Alert rules (OPS-02, R3.5; T24). Service health and model health are separate
+# groups, as they are separate dashboards. There is no Alertmanager in the stack:
+# firing alerts show on Prometheus's /alerts page.
+# Not run in the build sandbox: check with `promtool check rules alerts.yml`.
+#
+# Counters with labels must be created at start-up (label sets at 0), or the
+# first increment is invisible to rate() and increase(); the wiring notes in
+# ops/README.md say which label sets each service creates.
+
+groups:
+  - name: pdm-service-health
+    rules:
+      - alert: PdmServiceDown
+        expr: up{job!="prometheus"} == 0 or pdm_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          area: service
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: >-
+            {{ $labels.job }} ({{ $labels.instance }}) has not answered a scrape, or reports
+            pdm_up = 0 (running but unable to work, e.g. no broker), for a minute.
+
+      - alert: PdmScoringLatencyHigh
+        expr: histogram_quantile(0.95, sum by (asset, le) (rate(pdm_scoring_seconds_bucket[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+          area: service
+        annotations:
+          summary: "p95 scoring latency for {{ $labels.asset }} is {{ $value | humanizeDuration }}"
+          description: >-
+            The 95th percentile of the detector's time per window over the last 5 minutes is over
+            the 2 s target (NFR-01). It measures time inside the detector, store write included;
+            the broker hop is not in it.
+
+      - alert: PdmQuarantineRateRising
+        expr: |
+          sum by (asset) (rate(pdm_records_quarantined_total[10m]))
+            / sum by (asset) (rate(pdm_records_in_total[10m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          area: service
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of {{ $labels.asset }} records quarantined"
+          description: >-
+            Over the last 10 minutes more than 1 % of incoming records failed validation (normally
+            none do). The codes are on the service-health dashboard and in the quarantine table.
+
+  - name: pdm-model-health
+    rules:
+      - alert: PdmBriefRejections
+        expr: sum by (stage) (increase(pdm_brief_rejections_total[1h])) > 0
+        labels:
+          severity: warning
+          area: model
+        annotations:
+          summary: "briefs rejected at stage {{ $labels.stage }} in the last hour"
+          description: >-
+            The brief validator rejected about {{ $value | printf "%.0f" }} brief(s) at stage
+            {{ $labels.stage }} in the last hour. draft: a repair turn followed; repair: the
+            insufficient-evidence fallback was stored; api: the API refused a submitted brief.
+            The validator's reasons are in the agent's log lines for the incident.

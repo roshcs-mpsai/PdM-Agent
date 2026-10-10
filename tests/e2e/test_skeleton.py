@@ -56,8 +56,10 @@ def _write_csv(path, profile):
 
 
 def _start(args, log):
+    # plain log lines (the stack logs JSON) and no metrics ports, so tests can run beside a stack
+    env = dict(os.environ, PDM_LOG_FORMAT="text", PDM_METRICS_PORT="off")
     return subprocess.Popen([sys.executable, *args], cwd=ROOT, stdout=subprocess.PIPE,
-                            stderr=open(log, "w"), text=True)
+                            stderr=open(log, "w"), text=True, env=env)
 
 
 def _wait_for(log, text, count=1, timeout=20.0):

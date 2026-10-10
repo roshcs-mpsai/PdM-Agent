@@ -36,6 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+from pdm_common import logs, metrics  # noqa: E402
 from pdm_common.features import features_file  # noqa: E402
 from pdm_common.frozen import Frozen, FrozenError, load_frozen  # noqa: E402
 from pdm_common.hashing import canonical_json  # noqa: E402
@@ -77,6 +78,7 @@ class Prognostics:
         self.scores: deque = deque()                 # (window_end, score) within the history
         self.windows: dict[str, dict] = {}           # window_end -> features, for windows ending on the hour
         self.counts = {"windows": 0, "scores": 0, "prognoses": 0}
+        self.m = metrics.service_metrics("prognostics")
 
     # -- inputs -------------------------------------------------------------------------------
     def handle_window(self, payload) -> list[Out]:
@@ -145,6 +147,7 @@ class Prognostics:
             "profile_sha256": self.profile_sha256,
         }
         self.counts["prognoses"] += 1
+        self.m.prognoses_total.labels(asset=self.asset).inc()
         if self.store is not None:
             self.store.insert("prognoses", {
                 "asset_id": self.asset, "ts": doc["ts"], "probabilities": horizons, "attribution": attribution,
@@ -175,7 +178,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    logs.setup("prognostics")
     try:
         profile = load_profile(args.profile)
         frozen = load_for_profile(profile, args.profile, args.config)

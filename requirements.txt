@@ -23,3 +23,9 @@ uvicorn>=0.30
 httpx>=0.27
 # G8 stretch: the read-only CIP client (services/south/cip.py); its tests use a fake driver
 pycomm3>=1.2
+# T17/T24: JSON Schema validation (pdm_common.schemas) and, for live traces, the OpenTelemetry SDK
+# (pdm_common.tracing is a no-op without it)
+jsonschema>=4
+opentelemetry-api>=1.25
+opentelemetry-sdk>=1.25
+opentelemetry-exporter-otlp-proto-http>=1.25
