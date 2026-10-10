@@ -79,7 +79,9 @@ def diagnosed(world, sink=None, steps=None, state="sufficient") -> tuple[str, di
 def test_tokens_are_checked_and_weak_ones_refused(world):
     client = world[3]
     assert client.get("/health").json()["status"] == "ok"
-    assert "pdm_http_requests_total" in client.get("/metrics").text
+    assert client.get("/metrics").status_code == 404           # metrics are on 9107, core network only
+    from pdm_common import metrics
+    assert "pdm_http_requests_total" in metrics.REGISTRY.exposition()
     r = client.get("/assets")
     assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
     assert client.get("/assets", headers={"Authorization": "Bearer " + "x" * 40}).status_code == 401

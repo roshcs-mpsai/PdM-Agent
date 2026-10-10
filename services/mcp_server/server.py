@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from tools import ALLOWLIST, ARMS, INPUTS, DESCRIPTIONS, ToolRefused, ToolServer  # noqa: E402
 
-from pdm_common import logs, metrics  # noqa: E402
+from pdm_common import logs, metrics, tracing  # noqa: E402
 
 log = logging.getLogger("mcp_server")
 CONTEXT_URI = "pdm://incidents/{incident_id}/runs/{trace_id}/{arm}/context"
@@ -174,6 +174,7 @@ def main(argv=None) -> None:
     p.add_argument("--dates", action="store_true", help="show absolute times instead of minutes before the opening")
     args = p.parse_args(argv)
     logs.setup("mcp_server")
+    tracing.configure("mcp_server")            # OTLP to $OTEL_EXPORTER_OTLP_ENDPOINT when the SDK is installed
     tools = make_tools(args.profile, args.store, blind_dates=not args.dates)
     server = build(tools)
     metrics.serve(metrics.REGISTRY, metrics.port_for("mcp_server"), os.environ.get("PDM_METRICS_HOST", "127.0.0.1"),

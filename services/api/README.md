@@ -10,7 +10,9 @@ python services/api/main.py [--store "$PDM_STORE"] [--host 0.0.0.0 --port 8000]
 
 Starlette and uvicorn. The FRD names FastAPI, which could not be installed in the build
 environment; the routes and roles are the FRD's, and moving them to FastAPI later is a
-change of decorators. Metrics at `/metrics` (and on port 9107 with the other services).
+change of decorators. Metrics are on port 9107 with the other services' (`/metrics` and
+`/health` there), which only the core network reaches; port 8000 serves `/health` and
+the routes below.
 
 ## Sign-in and roles
 
@@ -25,7 +27,7 @@ logged or echoed.
 
 | Method and path | Roles | |
 |---|---|---|
-| GET /health, GET /metrics | none | liveness; Prometheus text |
+| GET /health | none | liveness |
 | GET /me | any | who the token belongs to |
 | GET /assets | people | NE 107 status, P(24/72/168 h) with bounds and the model's skill, open incidents, last update; highest P(72 h) first (HIL-01) |
 | GET /assets/{id} | people | the same, the latest alert's per-feature attribution, the open incidents (HIL-02) |

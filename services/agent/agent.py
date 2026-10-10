@@ -42,7 +42,7 @@ import llm  # noqa: E402
 import runner as runner_mod  # noqa: E402
 import sinks  # noqa: E402
 import toolsets  # noqa: E402
-from pdm_common import logs, metrics  # noqa: E402
+from pdm_common import logs, metrics, tracing  # noqa: E402
 from pdm_common.mqtt import Out, run_service  # noqa: E402
 from pdm_common.profile import load_profile, profile_hash, read_yaml  # noqa: E402
 from pdm_common.skills import load_skills  # noqa: E402
@@ -207,6 +207,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 def main(argv=None) -> int:
     args = parse_args(argv)
     logs.setup("agent")
+    tracing.configure("agent")                 # OTLP to $OTEL_EXPORTER_OTLP_ENDPOINT when the SDK is installed
     cfg = load_config(args.config)
     arm = args.arm or cfg.get("arm", "full")
     profile = load_profile(args.profile)

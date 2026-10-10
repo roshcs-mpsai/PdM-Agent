@@ -8,7 +8,7 @@ environment; the routes are the FRD's). Tokens and roles: services/api/auth.py.
 
 | Method and path | Roles | |
 |---|---|---|
-| GET /health, GET /metrics | none | liveness; Prometheus text |
+| GET /health | none | liveness (the metrics are on port 9107, on the core network only) |
 | GET /me | any | who the token belongs to (the dashboard's sign-in) |
 | GET /assets | people | HIL-01: status, P(24/72/168 h) with bounds, open incidents; by P(72 h) |
 | GET /assets/{id} | people | HIL-02: the summary, the latest alert's attribution, open incidents |
@@ -44,7 +44,7 @@ sys.path.insert(0, str(HERE))
 
 from starlette.applications import Starlette  # noqa: E402
 from starlette.requests import Request  # noqa: E402
-from starlette.responses import JSONResponse, PlainTextResponse, Response  # noqa: E402
+from starlette.responses import Response  # noqa: E402
 from starlette.routing import Match, Route  # noqa: E402
 
 import auth  # noqa: E402
@@ -141,9 +141,6 @@ def create_app(store=None, tokens: Optional[dict] = None, *, skill_for=None, ext
             return _json({"status": "ok", "service": "api"})
         except Exception as exc:
             return _json({"status": "unavailable", "error": type(exc).__name__}, 503)
-
-    async def metrics_text(request: Request) -> Response:
-        return PlainTextResponse(metrics.REGISTRY.exposition(), media_type=metrics.CONTENT_TYPE)
 
     # -- people ------------------------------------------------------------------------------------
     @route("/me", ["GET"], auth.ROLES)
@@ -284,7 +281,7 @@ def create_app(store=None, tokens: Optional[dict] = None, *, skill_for=None, ext
     async def outages(request, principal):
         return _json({"runs": agent_side.outage_tries(store, request.path_params["incident_id"])})
 
-    routes = [Route("/health", health), Route("/metrics", metrics_text), me, assets, asset, asset_series,
+    routes = [Route("/health", health), me, assets, asset, asset_series,
               incident_list, incident, result, work_order_list, decide, decision_audit, trace, claim, release,
               submit_brief, checkpoint, save_trace, unfinished, outages, *extra_routes]
 
