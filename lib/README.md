@@ -26,7 +26,7 @@ pip install -e lib     # once per environment; CI does the same
 | `gate` | `gate_params()`, `gate_passes()`, `incidents()`, `gate()`, `lead_at_report()`: the persistence gate as pure functions; `StreamingGate`: the same, one window at a time | INC-01 to INC-04 |
 | `incidents` | the incident lifecycle: `open_incident()`, `transition()` (attributed, compare-and-set), `claim()`, `replay_state()` | INC-05, INC-06 |
 | `asof` | `telemetry_frame()`, `grid_asof()`, `window_asof()`, `evidence_asof()`: the store's data as of a moment, through the ingest pipeline | AGT-04 |
-| `frozen` | `load_frozen()`, `DetectorModel`: the frozen bundles, verified against eval/config.yaml before anything scores with them | DET-08, NFR-05 |
+| `frozen` | `load_frozen()`, `DetectorModel`, `SurvivalModel`: the frozen bundles, verified against eval/config.yaml before anything scores or predicts with them | DET-08, NFR-05, PRG-02 |
 | `store` | `Store`, `open_store()`: one schema for PostgreSQL/TimescaleDB and SQLite, insert-only audit tables enforced by triggers, rows as dicts with UTC ISO times; `python -m pdm_common.store --ddl postgres` writes db/init/001_schema.sql | FRD section 8, ESR-02, HIL-05 |
 | `checks` | `Evidence` (what an alarm's checks may read: the grid before the opening, the opening window, the gaps), `CheckResult`, `load_registry()`: the shared side of the per-asset checks in checks/<asset>/ | AGT-05 |
 | `status` | `ne107()`: the NE 107 status and its causes from score, gate, incident, diagnosis, prognosis, drift and data; `marker()` colours | INC-07, INT-03 |

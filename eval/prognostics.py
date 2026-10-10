@@ -61,6 +61,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 sys.path.insert(0, str(ROOT / "eval"))
 
+from pdm_common.frozen import SurvivalModel  # noqa: E402
+
 HORIZONS = (24, 72, 168)
 INPUTS = ["score_max_24h", "score_mean_24h", "alert_share_24h", "load_share_6h", "rest_share_6h", "oil_rise_1h"]
 WINDOW_INPUTS = {"load_share_6h": "load_share_6h", "rest_share_6h": "rest_share_6h", "oil_rise_1h": "oil_rise_1h"}
@@ -356,43 +358,16 @@ def fit_bundle(table: pd.DataFrame, kind: str, n_boot: int = 200, seed: int = SE
             "bootstrap": boots, "constant_hazard_per_h": constant_hazard(table)}
 
 
-def _predict_export(model: dict, x: np.ndarray) -> np.ndarray:
-    prep = model["prep"]
-    z = (np.where(np.isnan(x), prep["median"], x) - np.array(prep["mean"])) / np.array(prep["std"])
-    out = []
-    for h in HORIZONS:
-        m = model["horizons"][str(h)]
-        out.append(model["prior"][str(h)] if m is None else 1 / (1 + np.exp(-(z @ np.array(m["coef"]) + m["intercept"]))))
-    return np.maximum.accumulate(np.array(out, dtype=float))
-
-
 def predict_bundle(bundle: dict, row: dict, interval: float = 0.9) -> dict:
-    """P(failure within h) with its bootstrap interval, for one hourly input row."""
-    x = np.array([np.nan if row.get(k) is None else float(row[k]) for k in bundle["features"]], dtype=float)
-    point = _predict_export(bundle["main"], x)
-    boots = np.array([_predict_export(b, x) for b in bundle["bootstrap"]])
-    lo_q, hi_q = 100 * (1 - interval) / 2, 100 * (1 + interval) / 2
-    lo, hi = np.percentile(boots, [lo_q, hi_q], axis=0)
-    out = {}
-    for j, h in enumerate(bundle["horizons_h"]):
-        out[str(h)] = {"p": float(point[j]), "lower": float(min(lo[j], point[j])), "upper": float(max(hi[j], point[j]))}
-    return out
+    """P(failure within h) with its bootstrap interval, for one hourly input row
+    (pdm_common.frozen.SurvivalModel, which the prognostics service runs too)."""
+    return SurvivalModel(bundle).predict(row, interval)
 
 
 def attribution(bundle: dict, row: dict, horizon: int = 72) -> list[dict]:
     """Exact per-input contributions to the log-odds of P(failure within ``horizon``)
     against the training mean (linear SHAP for a logistic model), largest first."""
-    model = bundle["main"]
-    m = model["horizons"][str(horizon)]
-    if m is None:
-        return []
-    prep = model["prep"]
-    x = np.array([np.nan if row.get(k) is None else float(row[k]) for k in bundle["features"]], dtype=float)
-    z = (np.where(np.isnan(x), prep["median"], x) - np.array(prep["mean"])) / np.array(prep["std"])
-    contrib = np.array(m["coef"]) * z
-    order = np.argsort(-np.abs(contrib))
-    return [{"input": bundle["features"][i], "value": None if np.isnan(x[i]) else float(x[i]),
-             "log_odds": float(contrib[i])} for i in order]
+    return SurvivalModel(bundle).attribution(row, horizon)
 
 
 # --- command line ----------------------------------------------------------------------------------

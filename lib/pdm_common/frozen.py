@@ -99,6 +99,64 @@ class DetectorModel:
 
 
 @dataclass
+class SurvivalModel:
+    """P(failure within each horizon) from a frozen survival bundle (logistic per
+    horizon, made monotone), with the bootstrap interval and the exact per-input
+    contributions to the log-odds. numpy only, like DetectorModel; the
+    prognostics service and eval/prognostics.py share it."""
+    bundle: dict
+
+    def __post_init__(self):
+        if self.bundle.get("schema") not in (None, SURVIVAL_SCHEMA):
+            raise FrozenError(f"not a {SURVIVAL_SCHEMA} bundle")
+        self.features = list(self.bundle["features"])
+        self.horizons = [int(h) for h in self.bundle["horizons_h"]]
+        self.constant_hazard_per_h = float(self.bundle.get("constant_hazard_per_h", float("nan")))
+
+    def row(self, values: dict) -> np.ndarray:
+        return np.array([np.nan if values.get(k) is None else float(values[k]) for k in self.features], dtype=float)
+
+    def _z(self, model: dict, x: np.ndarray) -> np.ndarray:
+        prep = model["prep"]
+        return (np.where(np.isnan(x), prep["median"], x) - np.array(prep["mean"])) / np.array(prep["std"])
+
+    def _probabilities(self, model: dict, x: np.ndarray) -> np.ndarray:
+        z = self._z(model, x)
+        out = []
+        for h in self.horizons:
+            m = model["horizons"][str(h)]
+            out.append(model["prior"][str(h)] if m is None
+                       else 1 / (1 + np.exp(-(z @ np.array(m["coef"]) + m["intercept"]))))
+        return np.maximum.accumulate(np.array(out, dtype=float))
+
+    def predict(self, values: dict, interval: float = 0.9) -> dict:
+        """{"24": {"p", "lower", "upper"}, ...}: the point estimate and the bootstrap interval."""
+        x = self.row(values)
+        point = self._probabilities(self.bundle["main"], x)
+        boots = np.array([self._probabilities(b, x) for b in self.bundle["bootstrap"]])
+        lo, hi = np.percentile(boots, [100 * (1 - interval) / 2, 100 * (1 + interval) / 2], axis=0)
+        return {str(h): {"p": float(point[j]), "lower": float(min(lo[j], point[j])),
+                         "upper": float(max(hi[j], point[j]))} for j, h in enumerate(self.horizons)}
+
+    def attribution(self, values: dict, horizon: int = 72) -> list[dict]:
+        """Each input's contribution to the log-odds of P(failure within ``horizon``)
+        against the training mean (linear SHAP for a logistic model), largest first."""
+        model = self.bundle["main"]
+        m = model["horizons"][str(horizon)]
+        if m is None:
+            return []
+        x = self.row(values)
+        contrib = np.array(m["coef"]) * self._z(model, x)
+        return [{"input": self.features[i], "value": None if np.isnan(x[i]) else float(x[i]),
+                 "log_odds": float(contrib[i])} for i in np.argsort(-np.abs(contrib))]
+
+    def constant_hazard(self) -> dict:
+        """The baseline's P(h) = 1 - exp(-lambda h), for the dashboard's comparison."""
+        lam = self.constant_hazard_per_h
+        return {str(h): float(1 - np.exp(-lam * h)) for h in self.horizons}
+
+
+@dataclass
 class Frozen:
     config: dict
     root: Path
@@ -108,6 +166,12 @@ class Frozen:
     @property
     def detector(self) -> DetectorModel:
         return DetectorModel(self.detector_bundle)
+
+    @property
+    def survival(self) -> "SurvivalModel":
+        if self.survival_bundle is None:
+            raise FrozenError("the freeze pins no survival model")
+        return SurvivalModel(self.survival_bundle)
 
     @property
     def detector_run_id(self) -> str:
