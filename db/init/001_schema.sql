@@ -144,6 +144,17 @@ CREATE TABLE IF NOT EXISTS agent_traces (
   PRIMARY KEY (trace_id)
 );
 
+-- the agent run's state after each step, so a restarted agent resumes it
+CREATE TABLE IF NOT EXISTS agent_checkpoints (
+  trace_id TEXT,
+  incident_id TEXT,
+  arm TEXT,
+  node TEXT,
+  state JSONB,
+  updated_at TIMESTAMPTZ,
+  PRIMARY KEY (trace_id)
+);
+
 -- brief_v1 documents; a repair adds a row (BRF-01)
 CREATE TABLE IF NOT EXISTS briefs (
   brief_id TEXT,
@@ -277,6 +288,8 @@ CREATE TABLE IF NOT EXISTS promotions (
 CREATE INDEX IF NOT EXISTS tool_results_incident_id_idx ON tool_results (incident_id);
 CREATE INDEX IF NOT EXISTS briefs_incident_id_idx ON briefs (incident_id);
 CREATE INDEX IF NOT EXISTS decisions_incident_id_idx ON decisions (incident_id);
+CREATE INDEX IF NOT EXISTS agent_traces_incident_id_idx ON agent_traces (incident_id);
+CREATE INDEX IF NOT EXISTS agent_checkpoints_incident_id_idx ON agent_checkpoints (incident_id);
 CREATE INDEX IF NOT EXISTS incident_events_incident_id_idx ON incident_events (incident_id);
 CREATE INDEX IF NOT EXISTS work_orders_status_idx ON work_orders (status);
 CREATE INDEX IF NOT EXISTS incidents_asset_id_state_idx ON incidents (asset_id, state);

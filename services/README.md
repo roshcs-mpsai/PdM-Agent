@@ -11,7 +11,7 @@ lands (build order and owners are in the construction plan).
 | prognostics | Discrete-time survival models | R1 |
 | gate | Persistence gate | R2 |
 | mcp_server | Six-tool MCP server + checks dispatch | R2 |
-| agent | LangGraph loop, brief schema | R2 |
+| agent | Bounded diagnostic loop (budgets, validation, outage retries, checkpoints); LangGraph form in graph.py | R2 |
 | dashboard | Streamlit operator dashboard + approval store | R0 stub, R2 |
 | opcua_north | Read-only northbound OPC UA server: score, prognosis with bounds, NE 107, incident, versions | R2 |
 | connector | REST work-order connector | R2 |

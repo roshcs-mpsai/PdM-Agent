@@ -70,7 +70,7 @@ tests/test_metrics.py fails if they do. Add a metric there first.
 | `pdm_drift_checks_total`, `pdm_drift_alerts_total` | counter | asset | drift |
 | `pdm_tool_calls_total` | counter | tool, outcome | mcp_server: ok, rejected (allowlist or input schema), error; a name outside the allowlist counts as tool `unknown` |
 | `pdm_tool_call_seconds` | histogram | tool | mcp_server |
-| `pdm_agent_runs_total` | counter | arm, outcome | agent: sufficient, insufficient, budget_exhausted, fallback, error |
+| `pdm_agent_runs_total` | counter | arm, outcome | agent: sufficient, insufficient, budget_exhausted, fallback, model_unavailable (the incident was handed back), claimed_elsewhere, error |
 | `pdm_agent_run_seconds` | histogram, 1 to 300 s | arm | agent |
 | `pdm_agent_runs_in_progress` | gauge | | agent |
 | `pdm_brief_rejections_total` | counter | stage | agent (draft, repair), api (api) |

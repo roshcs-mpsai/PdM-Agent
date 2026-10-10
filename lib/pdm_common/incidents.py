@@ -10,7 +10,10 @@ Only the gate opens an incident; only the agent moves it to diagnosing and to
 awaiting_review (insufficient and budget-exhausted briefs too, so the planner
 always sees the alarm); only a reviewer approves or rejects; only the
 connector marks an approved order sent. Anything else is refused
-(``IllegalTransition``). The state is changed with a compare-and-set inside
+(``IllegalTransition``). The agent may also hand a claimed incident back,
+diagnosing -> open, when the language model cannot be reached (``release``):
+the incident stays on the dashboard as a raw alert and the next try claims it
+again (FRD section 5, model outage). The state is changed with a compare-and-set inside
 the same transaction as its event row, so two agents triggered by the same
 incident cannot both claim it (INC-06).
 
@@ -27,6 +30,7 @@ FINAL = ("closed",)
 TRANSITIONS = {
     ("open", "diagnosing"): ("agent",),
     ("diagnosing", "awaiting_review"): ("agent",),
+    ("diagnosing", "open"): ("agent",),                 # released: the language model was unavailable
     ("awaiting_review", "approved"): ("reviewer",),
     ("awaiting_review", "rejected"): ("reviewer",),
     ("approved", "sent"): ("connector",),
@@ -96,6 +100,16 @@ def claim(store, incident_id: str, agent: str = "agent", at=None) -> bool:
     """The agent's claim (INC-06): open -> diagnosing, once. False when another run has it."""
     try:
         transition(store, incident_id, "diagnosing", agent, "agent run started", at=at, expect="open")
+        return True
+    except IllegalTransition:
+        return False
+
+
+def release(store, incident_id: str, cause: str, agent: str = "agent", at=None) -> bool:
+    """The agent hands a claimed incident back (diagnosing -> open) so a later try can claim it.
+    False when the incident is not in diagnosing."""
+    try:
+        transition(store, incident_id, "open", agent, cause, at=at, expect="diagnosing")
         return True
     except IllegalTransition:
         return False

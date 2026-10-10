@@ -1,0 +1,25 @@
+# The diagnostic agent's settings (T16; AGT-07, AGT-08, AGT-11, AGT-12).
+# Budgets are enforced by the runtime (services/agent/runner.py), not asked of the model.
+
+model:
+  provider: anthropic
+  name: claude-opus-5-5        # pinned (AGT-11). The fixed id has no date suffix.
+  max_tokens: 8000             # per turn; covers the model's thinking and its text
+  effort: medium               # output_config.effort: low, medium, high, xhigh or max
+  strict_tools: true           # strict tool use: tool inputs always match their schemas
+  timeout_s: 60                # one API call
+  retries: 2                   # retries of one call after a connection error, 429, 5xx or 529
+  # No temperature. claude-opus-5-5 refuses any temperature, top_p or top_k other than the
+  # default (HTTP 400), so the FRD's "temperature 0" cannot be set. Runs are audited from the
+  # stored transcript instead (agent_traces), which NFR-05 already relies on.
+
+budget:                        # per incident (AGT-08)
+  tool_calls: 12               # calls of the six tools; submit_brief is not counted here
+  turns: 15                    # model calls
+  wall_s: 180
+  tokens: 50000                # input not read from cache + cache writes + output (thinking included)
+
+arm: full                      # full, or retrieval_only (search_knowledge alone) for the study arm (AGT-12)
+
+outage:                        # FRD section 5: the model is unreachable
+  retry_after_min: [5, 10]     # tries at 0, +5 and +15 min; after the third, a brief without the model

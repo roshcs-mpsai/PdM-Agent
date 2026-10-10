@@ -1,0 +1,18 @@
+[
+  [{"type": "tool_use", "name": "run_check", "input": {}}],
+  [{"type": "tool_use", "name": "attribute_anomaly", "input": {"top": 3}}],
+  [{"type": "tool_use", "name": "get_maintenance_history", "input": {"days_before": 30}}],
+  [{"type": "tool_use", "name": "search_knowledge", "input": {"query": "continuous load air leak"}}],
+  [{"type": "tool_use", "name": "submit_brief", "input": {
+    "evidence_state": "insufficient",
+    "summary": "A dry run with a fixed script: no model read the evidence. Review the recorded data.",
+    "hypotheses": [],
+    "prognosis": {"cites": ["{R:incident_context}"]},
+    "recommended_action": {"type": "data_quality_check",
+                           "text": "Review the data around the alarm before any inspection.",
+                           "cites": ["{R:run_check}"]},
+    "work_order": {"title": "Review the alarm data", "priority": "low",
+                   "tasks": ["Review the alarm's data and the checks that ran"],
+                   "safety_notes": ["No work on the equipment is requested by this order."]},
+    "checks_run": ["{R:run_check*}"]}}]
+]

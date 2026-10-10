@@ -25,12 +25,17 @@ def names() -> list[str]:
     return sorted(p.stem for p in SCHEMA_DIR.glob("*.json"))
 
 
-@lru_cache(maxsize=None)
-def validator(name: str) -> Draft202012Validator:
+def load_schema(name: str) -> dict:
+    """The schema document itself (a fresh copy each call)."""
     path = SCHEMA_DIR / f"{name}.json"
     if not path.exists():
         raise SchemaError(f"no schema {name} in {SCHEMA_DIR}")
-    schema = json.loads(path.read_text())
+    return json.loads(path.read_text())
+
+
+@lru_cache(maxsize=None)
+def validator(name: str) -> Draft202012Validator:
+    schema = load_schema(name)
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema)
 

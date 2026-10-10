@@ -138,7 +138,8 @@ SERVICE: dict[str, dict[str, Spec]] = {
     },
     "agent": {
         "pdm_agent_runs_total": Spec("counter", "Agent runs finished, by arm and outcome (sufficient, insufficient, "
-                                                "budget_exhausted, fallback, error)", ("arm", "outcome")),
+                                                "budget_exhausted, fallback, model_unavailable, claimed_elsewhere, "
+                                                "error)", ("arm", "outcome")),
         "pdm_agent_run_seconds": Spec("histogram", "Wall time of one agent run, by arm", ("arm",), AGENT_RUN_BUCKETS),
         "pdm_agent_runs_in_progress": Spec("gauge", "Agent runs in progress"),
         "pdm_brief_rejections_total": _BRIEF_REJECTIONS,

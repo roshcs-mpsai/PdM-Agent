@@ -28,7 +28,6 @@ same reason.
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 import logging
 import math
@@ -42,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pdm_common.asof import evidence_asof, telemetry_frame
 from pdm_common.corpus import Corpus, quote
+from pdm_common.diagnosis import run_token
 from pdm_common.events import event_span
 from pdm_common.profile import signal_names
 from pdm_common.timeutil import iso_utc, to_utc
@@ -135,10 +135,6 @@ class Run:
     @property
     def tools(self) -> tuple:
         return ARMS[self.arm]
-
-
-def run_token(trace_id: str) -> str:
-    return hashlib.sha256(trace_id.encode()).hexdigest()[:8]
 
 
 def _num(x, digits: int = 3):
@@ -244,20 +240,33 @@ class ToolServer:
                                 "report the probabilities as context, not as a forecast")
         else:
             prog = {"available": False, "reason": "no prognosis was recorded before the opening"}
+        opened = self.store.one("SELECT cause FROM incident_events WHERE incident_id = ? AND to_state = ? "
+                                "ORDER BY id LIMIT 1", [inc["incident_id"], "open"])
+        triage = inc.get("triage") or {}
         output = {
             "incident": {"incident_id": inc["incident_id"], "asset": self.asset,
                          "opened": "t = 0, the opening; times are minutes before it" if self.blind
                          else iso_utc(run.as_of),
+                         "cause": opened["cause"] if opened else None,
                          "gate": {k: gate.get(k) for k in ("span", "min_fraction", "hold_off", "alerting", "present")},
                          "detector_run_id": inc.get("detector_run_id")},
             "scores_behind_the_gate": {
                 "windows": len(scores), "over_threshold": sum(1 for s in scores if s["alert"]),
                 "threshold": _num(opening["threshold"]) if opening else None,
                 "score_at_opening": _num(opening["score"]) if opening else None,
-                "max_score": _num(max(s["score"] for s in scores)) if scores else None},
+                "max_score": _num(max(s["score"] for s in scores)) if scores else None,
+                "trajectory": [[self._when(run, s["window_end"]), _num(s["score"], 2), bool(s["alert"])]
+                               for s in reversed(scores)]},
             "status": {"ne107": status["to_status"], "cause": status["cause"]} if status else None,
             "prognosis": prog,
+            # the checks the gate ran at the opening, and what each triage rule would have done
+            # (evidence only: no rule removes an alarm)
+            "checks_at_opening": [{k: c.get(k) for k in ("id", "check", "kind", "result", "measured")}
+                                  for c in triage.get("checks") or []],
+            "triage_rules": triage.get("triage"),
         }
+        if self.blind:
+            output["scores_behind_the_gate"]["trajectory_columns"] = ["minutes_before_opening", "score", "alert"]
         return self._store(run, CONTEXT_TOOL, {}, output)
 
     def _db_time(self, table: str, column: str, iso: str):

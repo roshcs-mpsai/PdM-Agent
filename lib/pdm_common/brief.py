@@ -13,8 +13,9 @@ same agent run. ``validate_brief`` checks, in order:
 4. every number written in a claim appears in one of the results that claim
    cites, within the rounding it was written with (BRF-06);
 5. an insufficient brief lists the checks it ran and recommends a data-quality
-   check or monitoring, never an inspection; a budget-exhausted one says so
-   (BRF-03).
+   check or monitoring, never an inspection (BRF-03). In the study's
+   retrieval-only arm the agent has no run_check, so ``require_checks=False``
+   drops the list requirement and nothing else.
 
 ``fallback_brief`` builds the insufficient-evidence brief the agent falls back
 to after one failed repair: it cites only results that exist and makes no claim.
@@ -79,9 +80,11 @@ def number_supported(text: str, candidates: Iterable[float]) -> bool:
     return False
 
 
-def validate_brief(brief: dict, results: dict, *, incident_id: str | None = None) -> list[str]:
+def validate_brief(brief: dict, results: dict, *, incident_id: str | None = None,
+                   require_checks: bool = True) -> list[str]:
     """Problems with ``brief``; [] when valid. ``results``: result_id -> stored tool
-    result (tool_result_v1) of this run."""
+    result (tool_result_v1) of this run. ``require_checks``: an insufficient brief must
+    list run_check results (False only for a run without run_check, the retrieval-only arm)."""
     problems = validate("brief_v1", brief)
     if problems:
         return problems
@@ -112,7 +115,7 @@ def validate_brief(brief: dict, results: dict, *, incident_id: str | None = None
     if state == "insufficient":
         if brief["recommended_action"]["type"] not in ("data_quality_check", "monitor"):
             problems.append("recommended_action: an insufficient brief recommends a data-quality check or monitoring")
-        if not brief["checks_run"]:
+        if require_checks and not brief["checks_run"]:
             problems.append("checks_run: an insufficient brief lists the checks it ran")
     if state == "sufficient" and not brief["hypotheses"]:
         problems.append("hypotheses: a sufficient brief states at least one hypothesis")
@@ -129,7 +132,7 @@ def fallback_brief(*, brief_id: str, incident_id: str, asset_id: str, results: d
     context = [rid for rid, r in results.items() if r.get("tool") in PROGNOSIS_TOOLS]
     cites = checks or context
     summary = ("The evidence gathered did not support a diagnosis" if state == "insufficient"
-               else "The agent ran out of budget before it could finish a diagnosis")
+               else "Partial brief: the agent ran out of budget before it could finish a diagnosis")
     if reason:
         summary += f" ({reason})"
     return {

@@ -82,6 +82,10 @@ SCHEMA: dict[str, dict] = {
                                  ("budget", "json"), ("outcome", "text"), ("started_at", "ts"),
                                  ("finished_at", "ts")],
                      "pk": ["trace_id"], "insert_only": True, "doc": "the audit record of each agent run (AGT-11)"},
+    "agent_checkpoints": {"columns": [("trace_id", "text"), ("incident_id", "text"), ("arm", "text"),
+                                      ("node", "text"), ("state", "json"), ("updated_at", "ts")],
+                          "pk": ["trace_id"],
+                          "doc": "the agent run's state after each step, so a restarted agent resumes it"},
     "briefs": {"columns": [("brief_id", "text"), ("incident_id", "text"), ("document", "json"),
                            ("evidence_state", "text"), ("valid", "bool"), ("validation", "json"),
                            ("trace_id", "text"), ("arm", "text"), ("created_at", "ts")],
@@ -175,6 +179,7 @@ def ddl(dialect: str) -> str:
 
 def _indexes() -> str:
     idx = [("tool_results", ["incident_id"]), ("briefs", ["incident_id"]), ("decisions", ["incident_id"]),
+           ("agent_traces", ["incident_id"]), ("agent_checkpoints", ["incident_id"]),
            ("incident_events", ["incident_id"]), ("work_orders", ["status"]), ("incidents", ["asset_id", "state"]),
            ("gate_log", ["asset_id", "at"]), ("study_sessions", ["session_id"])]
     return "\n".join(f"CREATE INDEX IF NOT EXISTS {t}_{'_'.join(c)}_idx ON {t} ({', '.join(c)});" for t, c in idx)
