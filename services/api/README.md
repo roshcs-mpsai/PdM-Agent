@@ -43,8 +43,16 @@ logged or echoed.
 | POST /agent/runs/{trace}/checkpoint, /trace | agent | the run's checkpoint and trace |
 | GET /agent/runs/unfinished, /agent/incidents/{id}/outages | agent | runs to resume, outage tries |
 
-"People" is reviewer, engineer, operator and evaluator. The study endpoints (T34) are in
-`study.py`.
+"People" is reviewer, engineer, operator and evaluator. The study endpoints (T34,
+`study.py`, `PDM_STUDY_SALT` required) are added by `main()`:
+
+| Method and path | Roles | |
+|---|---|---|
+| POST /study/sessions | reviewer (own token) | consent first; a new session with shuffled incidents and balanced, blinded arms |
+| GET /study/sessions | reviewer | the caller's sessions and progress |
+| GET /study/sessions/{id}/next | reviewer | the next item under its label A, B or C |
+| POST /study/sessions/{id}/answers | reviewer | a 1-5 rating and a decision; seconds measured on the server |
+| GET /study/results | evaluator | per true arm, nothing that names a participant |
 
 ## Decisions
 

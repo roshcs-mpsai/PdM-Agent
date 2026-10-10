@@ -25,8 +25,8 @@ environment; the routes are the FRD's). Tokens and roles: services/api/auth.py.
 | POST /agent/runs/{trace}/checkpoint, /trace | agent | the run's checkpoint and its trace |
 | GET /agent/runs/unfinished, /agent/incidents/{id}/outages | agent | what the agent resumes and retries |
 
-"People" is reviewer, engineer, operator and evaluator. No route creates a work order except a
-decision (HIL-06).
+"People" is reviewer, engineer, operator and evaluator. ``main()`` adds the blinded study's
+endpoints (study.py, T34). No route creates a work order except a decision (HIL-06).
 """
 from __future__ import annotations
 
@@ -332,7 +332,9 @@ def main(argv=None) -> int:
         tokens = auth.load_tokens()
     except auth.AuthError as exc:
         raise SystemExit(f"api: {exc} (docs/SECURITY.md)")
-    app = create_app(open_store(args.store), tokens)
+    import study
+    store = open_store(args.store)
+    app = create_app(store, tokens, extra_routes=study.routes(lambda: store, tokens))
     server = metrics.serve(metrics.REGISTRY, metrics.port_for("api"), os.environ.get("PDM_METRICS_HOST", "127.0.0.1"),
                            service="api")
     import uvicorn

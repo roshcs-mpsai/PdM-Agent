@@ -1,10 +1,7 @@
-"""Status view (R0.5): the board rows, the printed fallback, and the
-Streamlit page run against a stand-in streamlit module (the real one is a
-dashboard-only dependency). No broker needed."""
+"""Status view (R0.5): the board rows and the printed fallback, no broker needed.
+The Streamlit page is now the four-page dashboard over the API (tests/test_dashboard.py)."""
 import json
-import runpy
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -75,39 +72,3 @@ def test_printed_fallback(profile, monkeypatch, capsys):
     assert line.startswith(profile["asset"]["id"])
     assert "[amber] out_of_specification" in line
     assert "last window 2020-07-15T16:00:00Z" in line and "score 5.39 / 4.00" in line
-
-
-class FakeStreamlit(types.ModuleType):
-    """Just enough of streamlit to execute app.py and record what it draws."""
-
-    def __init__(self):
-        super().__init__("streamlit")
-        self.drawn = []
-
-    def _record(self, *args, **kwargs):
-        self.drawn.append(" ".join(str(a) for a in args))
-
-    set_page_config = title = caption = error = button = markdown = _record
-
-    def columns(self, spec):
-        return [self for _ in spec]
-
-    def cache_resource(self, func):
-        return func
-
-    def fragment(self, func=None, *, run_every=None):
-        self.run_every = run_every
-        return lambda f: f
-
-
-def test_streamlit_page_draws_each_asset(profile, monkeypatch):
-    fake = FakeStreamlit()
-    monkeypatch.setitem(sys.modules, "streamlit", fake)
-    monkeypatch.setattr(status_view, "mqtt_reader",
-                        lambda host, port, timeout=1.5: lambda topic: status(profile, "good"))
-    runpy.run_path(str(ROOT / "services" / "dashboard" / "app.py"), run_name="__main__")
-    page = "\n".join(fake.drawn)
-    assert fake.run_every == 2.0
-    assert f"**{profile['asset']['id']}** · NE 107 **good**" in page
-    assert "#2e7d32" in page                     # the green marker
-    assert "last window 2020-07-15T16:00:00Z" in page
