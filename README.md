@@ -75,8 +75,9 @@ docker compose run --rm replayer        # the F4 lead-up at 1000x, about three m
 tools/verify_local.sh                   # the tests, the stack, a replay, an incident and its brief
 ```
 
-Without an Anthropic API key, `PDM_AGENT_ARGS="--scripted services/agent/scripts/dry_run.json"` in
-`.env` runs the agent on a fixed script. The secure broker (accounts, ACLs, TLS) is
+Without an Anthropic API key, `PDM_AGENT_ARGS="--policy rules"` in `.env` runs the agent on the
+triage skill's rules as code (eval/policy.py) instead of a model, and
+`PDM_AGENT_ARGS="--scripted services/agent/scripts/dry_run.json"` on a fixed script. The secure broker (accounts, ACLs, TLS) is
 `mosquitto/compose.secure.yaml` on top of `compose.yaml` (docs/RUNBOOK.md, docs/SECURITY.md).
 
 ## Quickstart: development
@@ -172,7 +173,8 @@ service READMEs say more. Tests marked (data) run only where `data/` holds the d
 | broker security | test_broker_security.py (ACL evaluator, password hashes), test_secrets.py | a broker loading the secure config |
 | observability | test_metrics.py, test_metrics_wiring.py, test_logs.py | Prometheus, Grafana, the collector, Jaeger; span export |
 | corpus, skills, checks, schemas | test_corpus.py, test_skills.py, test_checks.py, test_schemas.py | |
-| harness, freeze, promotion | test_harness.py, test_frozen.py, test_promote.py, test_register_bundle.py; CI runs eval/evaluate.py | an MLflow round trip |
+| harness, freeze, promotion | test_harness.py, test_frozen.py, test_promote.py, test_register_bundle.py; CI runs eval/evaluate.py; docs/evidence/G1_G2.md from the frozen evaluation | an MLflow round trip |
+| scripted incidents, journeys | test_scripted_incidents.py; test_journeys.py: Journeys A, B and C in one process, A and C on MetroPT-3 (data); the 20-incident library on the replayed campaign with the rules policy (docs/evidence/G3_scripted_incidents_rules.md) | the pinned model's run of the library and the manual groundedness review |
 | deployment | test_compose.py; `docker compose config` on both compose files | building the image and running the stack: tools/verify_local.sh |
 
 ## Working agreements
