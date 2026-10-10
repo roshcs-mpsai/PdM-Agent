@@ -199,48 +199,18 @@ curl -sG http://localhost:16686/api/traces --data-urlencode service=agent \
 
 ## Running it
 
-The lead adds these to compose.yaml (images to be pinned by digest, NFR-05; the
-tags below are suggestions and were not pulled here):
+compose.yaml runs Prometheus, Grafana, the collector and Jaeger, with their ports on
+127.0.0.1 through the `ops` network (docs/RUNBOOK.md); `GRAFANA_PASSWORD` in `.env` is
+required.
+Images are pinned to tags; pin them by digest on the demo host (NFR-05).
 
-```yaml
-  prometheus:
-    image: prom/prometheus:v2.54.1
-    volumes: ["./ops/prometheus:/etc/prometheus:ro"]
-    ports: ["127.0.0.1:9090:9090"]
-    restart: unless-stopped
-  grafana:
-    image: grafana/grafana:11.2.2
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD in .env}
-    volumes:
-      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports: ["127.0.0.1:3000:3000"]
-    restart: unless-stopped
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.111.0
-    command: ["--config=/etc/otelcol-contrib/collector.yml"]
-    volumes: ["./ops/otel/collector.yml:/etc/otelcol-contrib/collector.yml:ro"]
-    ports: ["127.0.0.1:4317:4317", "127.0.0.1:4318:4318"]
-    restart: unless-stopped
-  jaeger:
-    image: jaegertracing/all-in-one:1.62.0
-    environment: {COLLECTOR_OTLP_ENABLED: "true"}
-    ports: ["127.0.0.1:16686:16686"]
-    restart: unless-stopped
-```
-
-- The scrape targets are compose service names. While the services still run as
-  host processes, either run Prometheus on the host or point the targets at
+- The scrape targets are compose service names. To scrape services run as host
+  processes instead, run Prometheus on the host or point the targets at
   `host.docker.internal:91xx` (on Linux with `extra_hosts:
   ["host.docker.internal:host-gateway"]` on the prometheus service).
-- A job whose service does not exist yet (agent, api, connector, ...) reports
-  up = 0 and fires `PdmServiceDown` after a minute; comment the job out of
-  prometheus.yml until the service lands.
-- A compose health check for a Python service (OPS-08) can hit its /health:
-  `["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9102/health', timeout=3)"]`.
-  /health answers 503 when the service passes a `health` callable to `serve()` that
-  returns False.
+- The compose health check of each Python service asks its /health on its metrics
+  port; /health answers 503 when the service passes a `health` callable to `serve()`
+  that returns False (no broker connection, for the MQTT services).
 - Firing alerts show on Prometheus's /alerts page; there is no Alertmanager.
 
 ## The R3.5 checks

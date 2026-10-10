@@ -121,31 +121,12 @@ python tools/broker_users.py --check  # every ACL account has a password entry t
 docker compose up -d mosquitto
 ```
 
-compose.yaml still runs the R0 broker until its mosquitto service is replaced with this one:
-
-```yaml
-  mosquitto:
-    image: eclipse-mosquitto:2            # pin the exact version you test with
-    container_name: pdm-mosquitto
-    ports:
-      - "8883:8883"                       # MQTT over TLS; 1883 stays on the compose network
-    environment:
-      PDM_MQTT_PASSWORD_HEALTHCHECK: ${PDM_MQTT_PASSWORD_HEALTHCHECK:?run python tools/broker_users.py}
-    volumes:
-      - ./mosquitto/config/mosquitto.secure.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/config/acl:/mosquitto/config/acl:ro
-      - {type: bind, source: ./mosquitto/config/passwd, target: /mosquitto/config/passwd, read_only: true}
-      - {type: bind, source: ./mosquitto/certs, target: /mosquitto/certs, read_only: true}
-      - mosquitto-data:/mosquitto/data
-    healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/certs/ca.crt -u healthcheck -P \"$$PDM_MQTT_PASSWORD_HEALTHCHECK\" -t '$$SYS/broker/version' -C 1 -W 3 > /dev/null"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-```
-
-plus `mosquitto-data: {}` under the top-level `volumes:`. Notes on it:
+compose.yaml runs the R0 broker. `mosquitto/compose.secure.yaml` replaces it with this one
+when both files are used: put `COMPOSE_FILE=compose.yaml:mosquitto/compose.secure.yaml` in
+`.env` and every `docker compose` command reads both. The override publishes 8883 with TLS
+on 127.0.0.1 (`PDM_BROKER_BIND` to open it), mounts `mosquitto.secure.conf`, the ACL,
+`passwd` and the certificates read-only, keeps the broker's data on a volume, logs the
+health check in over TLS, and gives each service its own broker account. Notes on it:
 
 - Every mount is read-only. The image's entrypoint hands everything under `/mosquitto` to
   the mosquitto user when it starts, which would otherwise change the owner of these files

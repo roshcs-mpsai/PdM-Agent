@@ -29,36 +29,72 @@ and is not loaded before the Week 7 model freeze.
 ## Layout
 
 ```
-profiles/metropt3_apu/   asset_profile.yaml + events.yaml — every asset-specific
+profiles/metropt3_apu/   asset_profile.yaml, events.yaml, features.yaml: every asset-specific
                          fact lives here; shared code contains no MetroPT names
-lib/pdm_common/          shared library: profile and events loading, hashing,
-                         time helpers -- every service imports it
-services/                one directory per component (replayer, ingest, detector,
-                         prognostics, gate, mcp_server, agent, dashboard,
-                         opcua_north, connector)
-skills/                  shared agent skills + one folder per asset
-checks/                  deterministic diagnostic checks (pure functions)
-eval/                    leave-one-event-out harness, audits, study scripts
-notebooks/               EDA (metropt3_eda.ipynb — runs end-to-end in Colab)
-tests/                   unit, schema, negative and injection tests (CI-gated)
+lib/pdm_common/          the shared library every service imports (lib/README.md)
+services/                one folder per component, each with its README:
+  replayer               deterministic replay of the dataset to MQTT
+  ingest                 validation, quarantine, 10-minute windows and their features
+  detector               the frozen detector's score per window
+  prognostics            P(failure within 24/72/168 h) with intervals, every stream hour
+  gate                   persistence gate, incidents, NE 107 status
+  drift                  per-signal drift checks, candidate requests
+  mcp_server             the agent's six read-only tools over MCP
+  agent                  the bounded diagnostic loop that writes the brief
+  api                    the HTTP API: reads, reviewer decisions, the agent's writes, the study
+  dashboard              Streamlit pages over the API
+  connector              approved work orders to the maintenance system's REST endpoint
+  opcua_north            read-only OPC UA server for SCADA
+  south                  Sparkplug B and OPC UA adapters, the simulated SCADA, the CIP reader
+corpus/                  the knowledge corpus behind search_knowledge, with its source register
+skills/                  shared agent skills and one folder per asset
+checks/                  deterministic diagnostic checks, one folder per asset
+schemas/                 JSON Schema for every message, tool result and brief
+eval/                    leave-one-event-out harness, the freeze, the in-process pipeline, promotion
+db/                      the PostgreSQL schema, generated from lib/pdm_common/store.py
+mosquitto/               broker configs, the ACL, the secure-broker compose override
+ops/                     Prometheus, Grafana, OpenTelemetry collector configuration
+docker/                  the image every Python service runs
+docs/                    RUNBOOK.md (running the stack), SECURITY.md (accounts, TLS, tokens, secrets)
+tools/                   window builds and calibration, the freeze and the registry, broker accounts and
+                         certificates, the secret scan, the work-order simulator, verify_local.sh
+notebooks/               EDA (metropt3_eda.ipynb runs end to end in Colab)
+tests/                   unit, contract, negative, injection and e2e tests (CI-gated)
 ```
 
-## Quickstart
+## Quickstart: the full stack
+
+docs/RUNBOOK.md has the details: first-time setup, Journey A step by step, where to look when
+something fails, rotating secrets and backups.
+
+```bash
+cp .env.example .env                    # then fill it in (docs/RUNBOOK.md, first-time setup)
+docker compose up -d --build --wait     # every service, healthy
+docker compose run --rm replayer        # the F4 lead-up at 1000x, about three minutes
+# the dashboard: http://localhost:8501, sign in with your API token
+tools/verify_local.sh                   # the tests, the stack, a replay, an incident and its brief
+```
+
+Without an Anthropic API key, `PDM_AGENT_ARGS="--scripted services/agent/scripts/dry_run.json"` in
+`.env` runs the agent on a fixed script. The secure broker (accounts, ACLs, TLS) is
+`mosquitto/compose.secure.yaml` on top of `compose.yaml` (docs/RUNBOOK.md, docs/SECURITY.md).
+
+## Quickstart: development
 
 ```bash
 pip install -r requirements.txt
 pip install -e lib                 # pdm_common, the shared library
-pytest -q                          # profile/config invariants
+pytest -q                          # tests that need the dataset or a broker skip themselves
 python eval/evaluate.py            # harness Version Zero (prints fold plan)
-docker compose up -d               # Mosquitto broker (walking skeleton)
 jupyter lab notebooks/metropt3_eda.ipynb   # downloads the dataset on first run
 ```
 
-## Run the stream (replayer -> ingest -> detector)
+## Run the stream on the host (replayer -> ingest -> detector)
 
 A replayed record travels replayer -> ingest (10-minute windows and their
 features) -> frozen detector (scores), with a log line per window at every
-hop. One terminal per service, from the repository root:
+hop. One terminal per service, from the repository root, against the broker
+alone (not beside the full stack, which would consume the same topics):
 
 ```bash
 P=profiles/metropt3_apu/asset_profile.yaml
@@ -89,22 +125,55 @@ python tools/register_bundle.py eval/frozen/metropt3_apu/detector \
 If the image will not start, `mlflow server --backend-store-uri sqlite:///mlruns.db` from the
 virtual environment serves the same API on port 5000.
 
-## Start the database
+## The database
 
 ```bash
-cp .env.example .env                              # then set PG_PASSWORD
-docker compose up -d postgres                     # TimescaleDB 2.17 on PostgreSQL 16, schema from db/init
-export PDM_STORE="postgresql://pdm:<password>@localhost:5432/pdm"
-python tools/db_benchmark.py --store "$PDM_STORE" # a month of telemetry and the incident join, each under a minute
+docker compose up -d postgres     # TimescaleDB 2.17 on PostgreSQL 16, schema from db/init
+docker compose exec postgres psql -U pdm -d pdm
 ```
+
+In the stack the services reach the store as `postgres:5432` on the internal core network, and
+no port is published. To run host tools against it (`tools/db_benchmark.py --store "$PDM_STORE"`,
+`PDM_TEST_PG=<url of a scratch database> pytest tests/test_store.py`), publish it on 127.0.0.1
+with a `compose.override.yaml` (docs/RUNBOOK.md, development against the stack) and use
+`PDM_STORE="postgresql://pdm:<password>@localhost:5432/pdm"`.
 
 The schema is declared once, in `lib/pdm_common/store.py`; `db/init/001_schema.sql` is generated from
 it (`python -m pdm_common.store --ddl postgres`) and a test fails if the two disagree. Without
 `PDM_STORE`, everything uses SQLite at `runs/pdm.db`, which is what the tests and the single-process
-pipeline run on. `PDM_TEST_PG=<url of a scratch database> pytest tests/test_store.py` runs the store
-tests against PostgreSQL as well. The init scripts run only when the volume is new; after a schema
-change, apply the regenerated file with `psql -f db/init/001_schema.sql` (new tables and indexes go in
-place; a changed column needs a fresh volume).
+pipeline run on. The init scripts run only when the volume is new; after a schema change, apply the
+regenerated file with `docker compose exec -T postgres psql -U pdm -d pdm < db/init/001_schema.sql`
+(new tables and indexes go in place; a changed column needs a fresh volume).
+
+## Status
+
+What is built, and how far it has been tried. The build sandbox has no Docker daemon, no broker,
+no PostgreSQL and no model key, and lacks paho-mqtt, asyncua, streamlit, MLflow, LangGraph and the
+OpenTelemetry SDK, so every service has run there in process only: on SQLite, on the in-memory bus
+of eval/pipeline.py or against stand-ins. The last column is what still waits for a laptop; the
+service READMEs say more. Tests marked (data) run only where `data/` holds the dataset.
+
+| Part | Tests | Not run yet |
+|---|---|---|
+| replayer | test_replayer.py: determinism, faults, manifest | against a broker (tests/e2e) |
+| ingest | test_ingest.py, test_stream.py; tools/stream_check.py gets back all 239,172 evaluated windows (data) | with a broker and PostgreSQL |
+| detector | test_detector.py: Apr 1–21, 2020 through ingest gives the evaluated scores (data) | with a broker |
+| prognostics | test_prognostics_service.py: three weeks of 2020 give the evaluated rows (data) | with a broker |
+| gate | test_gate_service.py: the 34 incidents of the batch gate (data); test_pipeline.py: the F4 lead-up (data) | with a broker |
+| drift | test_drift.py: handlers in process, injected shifts (data) | with a broker; Evidently itself |
+| mcp_server | test_mcp_tools.py: every tool, refusals, as-of reads, MCP over streamable HTTP | in the stack |
+| agent | test_agent.py: scripted models through the real runner, tool server and store | a live model; the LangGraph form |
+| api | test_api.py: tokens, roles, decisions, the audit rebuild, on SQLite | PostgreSQL |
+| dashboard | test_dashboard.py and test_status_view.py (services/dashboard/README.md) | served by Streamlit |
+| connector | test_connector.py: against the simulator, retries, tamper checks | PostgreSQL; a real maintenance system |
+| opcua_north | test_opcua_north.py: the read-only model; the asyncua binding against a stand-in | asyncua; a SCADA client |
+| south | test_south.py, test_cip.py, test_workorder_sim.py, without a broker | paho-mqtt, asyncua, Node-RED, a CIP device |
+| store | test_store.py on SQLite; `PDM_TEST_PG` runs it on PostgreSQL | PostgreSQL |
+| broker security | test_broker_security.py (ACL evaluator, password hashes), test_secrets.py | a broker loading the secure config |
+| observability | test_metrics.py, test_metrics_wiring.py, test_logs.py | Prometheus, Grafana, the collector, Jaeger; span export |
+| corpus, skills, checks, schemas | test_corpus.py, test_skills.py, test_checks.py, test_schemas.py | |
+| harness, freeze, promotion | test_harness.py, test_frozen.py, test_promote.py, test_register_bundle.py; CI runs eval/evaluate.py | an MLflow round trip |
+| deployment | test_compose.py; `docker compose config` on both compose files | building the image and running the stack: tools/verify_local.sh |
 
 ## Working agreements
 
