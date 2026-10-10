@@ -6,6 +6,7 @@
     python eval/evaluate.py --processed data/processed_v4 --detector pca \\
         --golden data/processed_v4/detector_selection/selection.json         # the T27 done-check
     python eval/evaluate.py --processed DIR --scores scores_all.npz --key PCA   # saved scores, no fitting
+    python eval/evaluate.py --processed data/processed_v4 --detector pca --threshold spot   # SPOT (T11)
 
 With --processed it fits each detector on the fit windows, sets its threshold
 on the calibrate weeks at the budget of two gated incidents a week, measures
@@ -107,6 +108,11 @@ def run(args) -> int:
     results = {}
     for name, s in scores.items():
         results[name] = h.evaluate(s, ctx)
+        if args.threshold == "spot":
+            spot = spot_threshold(s, ctx, args)
+            results[f"{name} + SPOT"] = h.evaluate(s, ctx, threshold=spot["threshold"])
+            results[f"{name} + SPOT"]["spot"] = spot
+            info[f"{name} + SPOT"] = info[name]
     print(f"evaluated in {time.time() - t0:.0f} s (threshold grid, check weeks, uncertain periods, "
           f"{len(data.failures)} test blocks, 500 threshold re-draws each)")
 
@@ -123,20 +129,37 @@ def run(args) -> int:
 
     out_root = Path(args.out)
     for name, r in results.items():
-        folder = out_root / name.lower().replace(" ", "_").replace("(", "").replace(")", "")
+        folder = out_root / name.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("+", "plus")
         folder.mkdir(parents=True, exist_ok=True)
         comparison.loc[[name]].to_csv(folder / "comparison.csv")
         leads.loc[[name]].to_csv(folder / "lead_times.csv")
         aurocs.loc[[name]].to_csv(folder / "auroc.csv")
-        record = {"detector": name, **h.summary(r, failures),
+        record = {"detector": name, **h.summary(r, failures), **({"spot": r["spot"]} if "spot" in r else {}),
                   "inputs": {"windows_key": data.windows_key, "fit_key": h.fit_key(scaled.is_fit),
                              "source_sha256": data.manifest["source"]["sha256"], "windows": len(data.windows),
                              "fit_windows": int(scaled.fit_rows.sum())},
                   "gate": ctx.gate.as_dict(), "budget_per_week": args.budget}
         (folder / "result.json").write_text(json.dumps(record, indent=2))
-        np.savez_compressed(folder / "scores.npz", scores=np.asarray(scores[name]))
-    if len(results) > 1 and not args.scores:
-        rule = h.select(results, info, failures, budget=args.budget)
+        np.savez_compressed(folder / "scores.npz", scores=np.asarray(scores[name.replace(" + SPOT", "")]))
+    spot_rows = [n for n in results if n.endswith("+ SPOT")]
+    for name in spot_rows:
+        base, r = results[name.replace(" + SPOT", "")], results[name]
+        caught = sum(not np.isnan(r[f"{ev} lead"]) for ev in failures)
+        verdict = r["far hi"] <= args.budget and caught == len(failures)
+        r["spot"]["freeze_rule"] = {"far_interval_within_budget": bool(r["far hi"] <= args.budget),
+                                    "caught": caught, "use_spot": bool(verdict)}
+        print(f"\n{name}: held-out FAR {r['far']:.2f} [{r['far lo']:.2f}, {r['far hi']:.2f}] against "
+              f"{base['far']:.2f} [{base['far lo']:.2f}, {base['far hi']:.2f}] empirical; leads "
+              + ", ".join(f"{ev} {h._fmt_lead(r[f'{ev} lead'])}" for ev in failures)
+              + f". Freeze rule (interval at or under {args.budget:g} a week and {len(failures)} of "
+              f"{len(failures)} caught): {'SPOT' if verdict else 'empirical, SPOT reported as the comparison'}")
+        folder = out_root / name.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("+", "plus")
+        rec = json.loads((folder / "result.json").read_text())
+        rec["spot"] = r["spot"]
+        (folder / "result.json").write_text(json.dumps(rec, indent=2))
+    if len([n for n in results if not n.endswith("+ SPOT")]) > 1 and not args.scores:
+        rule = h.select({n: r for n, r in results.items() if not n.endswith("+ SPOT")}, info, failures,
+                        budget=args.budget)
         print("\n1. eligible (held-out interval reaches the budget): " + ", ".join(rule["eligible"]))
         print("2. deep models dropped by EVL-05: " + (", ".join(rule["deep_dropped_evl05"]) or "none"))
         print("3. best median lead per event among the rest, h: "
@@ -149,6 +172,29 @@ def run(args) -> int:
     if args.golden:
         return golden_check(results, Path(args.golden), failures)
     return 0
+
+
+def spot_threshold(scores, ctx, args) -> dict:
+    """T11: fit SPOT on the calibrate scores and choose q at the budget. If the
+    fitted shape falls outside [0, 1], refit at the 0.99 quantile and keep both
+    fits in the record (the plan's if-then); never adjust it against the events."""
+    import harness as h
+    from pdm_common.spot import calibrate_q, fit_spot
+
+    end_c, s_c = h.series(ctx, ctx.is_cal, scores)
+    fits = [fit_spot(s_c, init_quantile=args.init_quantile)]
+    if not 0.0 <= fits[0].gamma <= 1.0 and args.init_quantile < 0.99:
+        fits.append(fit_spot(s_c, init_quantile=0.99))
+    fit = fits[-1]
+    cal = calibrate_q(fit, end_c, s_c, ctx.gate, budget=ctx.budget)
+    print(f"\nSPOT on {len(s_c):,} calibrate scores: t = {fit.t:.4f} (the {fit.init_quantile} quantile), "
+          f"gamma = {fit.gamma:.3f}, sigma = {fit.sigma:.4f}, n = {fit.n}, n_t = {fit.n_t}; "
+          f"q = {cal['q']:.2e} -> threshold {cal['threshold']:.4f} "
+          f"({cal['calibrate_rate']:.2f} gated incidents a week on the calibrate weeks)")
+    if len(fits) > 1:
+        print(f"  (gamma {fits[0].gamma:.3f} at the {fits[0].init_quantile} quantile was outside [0, 1]; refitted)")
+    return {"fit": fit.as_dict(), "fits_tried": [f.as_dict() for f in fits], "q": cal["q"],
+            "threshold": cal["threshold"], "calibrate_rate": cal["calibrate_rate"], "scan": cal["scan"]}
 
 
 def golden_check(results: dict, golden_path: Path, failures) -> int:
@@ -195,6 +241,9 @@ def main(argv=None) -> int:
     p.add_argument("--scores", help="evaluate saved window scores (.npz) instead of fitting")
     p.add_argument("--key", help="with --scores: the array to evaluate (default: every array)")
     p.add_argument("--budget", type=float, default=2.0, help="false alarms per week (PRD G1)")
+    p.add_argument("--threshold", choices=["empirical", "spot"], default="empirical",
+                   help="spot: also evaluate each detector at its SPOT threshold (T11)")
+    p.add_argument("--init-quantile", type=float, default=0.98, help="SPOT's starting quantile")
     p.add_argument("--golden", help="selection.json to reproduce (the T27 done-check)")
     p.add_argument("--out", default=str(OUT))
     args = p.parse_args(argv)

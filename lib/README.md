@@ -20,6 +20,7 @@ pip install -e lib     # once per environment; CI does the same
 | `windows` | `window_ends()`, `make_windows()`, `add_folds()`: 10-minute windows at a 1-minute stride, complete or dropped, with zone, regime, test blocks, look-back flags and the fit / calibrate / check role; `MinuteWindower` for the R0 z-score | ING-11 |
 | `features` | `load_feature_spec()` and `window_features()`: the 42 features declared in the asset's features.yaml, computed by kind through channel roles | ING-12, DET-04 |
 | `mqtt` | `run_service()`: subscribe, handle, publish at QoS 1, flush on shutdown; `read_retained()` | — |
+| `spot` | `fit_spot()`, `threshold()`, `calibrate_q()`: the SPOT threshold from the GPD tail of healthy scores, q chosen at the budget | DET-05 |
 | `gate` | `gate_params()`, `gate_passes()`, `incidents()`, `gate()`, `lead_at_report()`: the persistence gate as pure functions | INC-01 to INC-04 |
 | `status` | NE 107 states, `r0_status()`, dashboard `marker()` colours | INC-07 stub |
 
