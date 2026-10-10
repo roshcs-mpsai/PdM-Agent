@@ -47,8 +47,8 @@ def status_row(profile: dict, payload: Optional[bytes]) -> dict:
         return dict(row, marker="amber", note=f"unreadable status: {exc}")
     return dict(row, ts=status.get("ts"), score=status.get("score"),
                 threshold=status.get("threshold"), alert=status.get("alert"),
-                ne107=status.get("ne107"), detector_run=status.get("detector_run"),
-                marker=marker(status.get("ne107")), note="")
+                ne107=status.get("ne107"), detector_run=status.get("detector_run_id") or status.get("detector_run"),
+                marker=marker(status.get("ne107")), note="; ".join(status.get("causes") or []))
 
 
 def mqtt_reader(host: str, port: int, timeout: float = 1.5) -> Reader:

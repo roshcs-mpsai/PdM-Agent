@@ -100,3 +100,86 @@ def lead_at_report(opens, closes, start_ns: int, end_ns: int) -> float:
         return (start_ns - opens[open_at_start].min()) / HOUR_NS
     during = opens[(opens > start_ns) & (opens <= end_ns)]
     return (start_ns - during.min()) / HOUR_NS if len(during) else float("nan")
+
+
+# --- the gate on a stream (the gate service, T12b) -------------------------------------------
+
+@dataclass
+class GateEvent:
+    """One gate decision. ``kind``: open (a pass opens an incident), attach (passes
+    resume inside an open episode), suppress (an alert run ended without a pass),
+    close (the episode went quiet for the hold-off). ``at_ns``: the window end that
+    decided it (for close, last pass + hold-off). ``trajectory``: the windows of
+    the gate span behind the decision as (end_ns, score, alert)."""
+    kind: str
+    at_ns: int
+    trajectory: list
+    alerting: int = 0
+    present: int = 0
+    episode_opened_ns: int | None = None
+
+
+class StreamingGate:
+    """``gate_passes`` and ``incidents`` one window at a time.
+
+    Feed windows in time order with ``add(end_ns, score, alert)``; it returns
+    the decisions they caused. Over the same windows it opens exactly the
+    incidents the batch functions do (tests/test_gate.py), so the alarm the
+    harness counted is the alarm the planner sees (INC-04).
+    """
+
+    def __init__(self, params: GateParams):
+        self.params = params
+        self.window: list[tuple[int, float, bool]] = []     # windows ending in the last span
+        self.opened_ns: int | None = None                    # the open episode, if any
+        self.last_pass_ns: int | None = None
+        self.passing = False                                  # did the previous window pass?
+        self._run: list[tuple[int, float, bool]] = []         # the current alert run, while it has not passed
+        self._run_passed = False
+
+    @property
+    def episode_open(self) -> bool:
+        return self.opened_ns is not None
+
+    def _trajectory(self):
+        return [(int(t), float(s), bool(a)) for t, s, a in self.window]
+
+    def close_due(self, now_ns: int) -> list[GateEvent]:
+        """Close the open episode if ``now_ns`` is past its last pass plus the hold-off."""
+        if self.opened_ns is not None and now_ns - self.last_pass_ns > self.params.hold_off_ns:
+            event = GateEvent("close", self.last_pass_ns + self.params.hold_off_ns, self._trajectory(),
+                              episode_opened_ns=self.opened_ns)
+            self.opened_ns = self.last_pass_ns = None
+            self.passing = False
+            return [event]
+        return []
+
+    def add(self, end_ns: int, score: float, alert: bool) -> list[GateEvent]:
+        end_ns, alert = int(end_ns), bool(alert)
+        events = self.close_due(end_ns)
+        self.window.append((end_ns, float(score), alert))
+        cutoff = end_ns - self.params.span_ns
+        while self.window and self.window[0][0] <= cutoff:
+            self.window.pop(0)
+        present = len(self.window)
+        alerting = sum(1 for _, _, a in self.window if a)
+        passes = present >= self.params.min_present and alerting >= self.params.min_fraction * present
+        if passes:
+            if self.opened_ns is None:
+                self.opened_ns = end_ns
+                events.append(GateEvent("open", end_ns, self._trajectory(), alerting, present, end_ns))
+            elif not self.passing:
+                events.append(GateEvent("attach", end_ns, self._trajectory(), alerting, present, self.opened_ns))
+            self.last_pass_ns = end_ns
+            self._run_passed = True
+        # an alert run that ends without ever passing was suppressed by the gate
+        if alert:
+            self._run.append((end_ns, float(score), alert))
+        elif self._run:
+            if not self._run_passed and self.opened_ns is None:
+                events.append(GateEvent("suppress", end_ns, self._trajectory(), alerting, present))
+            self._run, self._run_passed = [], False
+        if not alert:
+            self._run_passed = False
+        self.passing = passes
+        return events

@@ -295,9 +295,11 @@ class Store:
             finally:
                 self._depth = 0
 
-    def execute(self, sql: str, params: Iterable = ()) -> None:
+    def execute(self, sql: str, params: Iterable = ()) -> int:
+        """Run one statement; returns the number of rows it changed."""
         with self._lock:
-            self.conn.execute(self._sql(sql), tuple(params))
+            cur = self.conn.execute(self._sql(sql), tuple(params))
+            return cur.rowcount if cur.rowcount is not None else -1
 
     def query(self, sql: str, params: Iterable = (), table: str | None = None) -> list[dict]:
         with self._lock:
@@ -338,15 +340,17 @@ class Store:
                     cur.executemany(sql, data)
         return len(rows)
 
-    def update(self, table: str, key: dict, values: dict) -> None:
-        """For the tables whose rows change: incidents (via pdm_common.incidents) and work_orders."""
+    def update(self, table: str, key: dict, values: dict) -> int:
+        """For the tables whose rows change: incidents (via pdm_common.incidents) and
+        work_orders. ``key`` may hold any columns, so an update can be conditional
+        (compare and set); returns the number of rows changed."""
         if table in INSERT_ONLY:
             raise StoreError(f"{table} is insert-only")
         sets = ", ".join(f"{c} = ?" for c in values)
         where = " AND ".join(f"{c} = ?" for c in key)
         params = [_to_db(table, c, v, self.dialect) for c, v in values.items()] + \
                  [_to_db(table, c, v, self.dialect) for c, v in key.items()]
-        self.execute(f"UPDATE {table} SET {sets} WHERE {where}", params)
+        return self.execute(f"UPDATE {table} SET {sets} WHERE {where}", params)
 
     def select(self, table: str, where: dict | None = None, order: str | None = None, limit: int | None = None,
                columns: str = "*") -> list[dict]:

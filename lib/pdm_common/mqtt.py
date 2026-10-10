@@ -43,8 +43,13 @@ def run_service(
     port: int = 1883,
     on_stop: Optional[Callable[[], Iterable[Out]]] = None,
     qos: int = 1,
+    tick: Optional[tuple[float, Callable[[], Iterable[Out]]]] = None,
 ) -> None:
     """Run until SIGINT or SIGTERM. ``handlers`` maps exact topics to handlers.
+
+    ``tick``: (seconds, function) -- called every so many wall seconds, never at
+    the same time as a handler, and what it returns is published (the gate's
+    no-data check).
 
     Shutdown runs in a fixed order: stop handling (anything still arriving is
     left unprocessed and counted in the log), publish what ``on_stop``
@@ -94,7 +99,21 @@ def run_service(
                          "is it running? docker compose up -d")
     client.loop_start()
     try:
-        stop.wait()
+        if tick is None:
+            stop.wait()
+        else:
+            every, fn = tick
+            while not stop.wait(every):
+                with lock:
+                    if closing.is_set():
+                        break
+                    try:
+                        outs = list(fn())
+                    except Exception:
+                        log.exception("tick failed")
+                        outs = []
+                for out in outs:
+                    client.publish(out.topic, out.payload, qos=qos, retain=out.retain)
     finally:
         with lock:
             closing.set()                     # from here on, messages are not handled
