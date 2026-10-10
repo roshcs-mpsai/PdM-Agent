@@ -58,6 +58,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Optional
 
+from pdm_common import broker
 from pdm_common.hashing import canonical_json
 from pdm_common.mqtt import Out
 from pdm_common.profile import ProfileError, load_profile, signal_names
@@ -779,7 +780,7 @@ def run(adapter: SparkplugAdapter, *, host: str = "localhost", port: int = 1883,
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
     try:
-        client.connect(host, port)
+        broker.connect(client, "south", host, port)
     except OSError as exc:
         raise SystemExit(f"sparkplug: cannot reach the broker at {host}:{port} ({exc}); "
                          "is it running? docker compose up -d")

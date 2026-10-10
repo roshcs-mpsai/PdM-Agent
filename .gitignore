@@ -24,3 +24,7 @@ build/
 
 # secrets (database and API passwords arrive in R1a.3)
 .env
+
+# broker secrets (R3): password hashes and TLS keys, from tools/broker_users.py and tools/make_certs.sh
+mosquitto/config/passwd
+mosquitto/certs/

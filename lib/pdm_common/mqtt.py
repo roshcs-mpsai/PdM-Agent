@@ -9,14 +9,21 @@ tests drive every service without a broker.
 
 Every service also gets the standard metrics (pdm_common.metrics: messages in
 and out per topic, handler time and errors, ``pdm_up``) on its port in
-``metrics.PORTS`` (``PDM_METRICS_PORT`` overrides, ``off`` disables), with
-``/health`` answering 503 while the broker connection is down.
+``metrics.PORTS`` (``PDM_METRICS_PORT`` overrides, ``off`` disables), bound to
+``PDM_METRICS_HOST`` (127.0.0.1 unless set; the stack sets 0.0.0.0 inside its
+private network), with ``/health`` answering 503 while the broker connection is
+down.
 
-Broker authentication, ACLs and persistent sessions arrive in R3 hardening.
+The broker account, TLS and the broker address come from the environment
+(pdm_common.broker, docs/SECURITY.md). ``PDM_MQTT_PERSISTENT=1`` keeps the
+session on the broker between restarts (clean_session off), so QoS 1 messages
+published while a service is down are delivered when it comes back (R3.6); it
+is off by default so test runs never inherit each other's queued messages.
 """
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 from dataclasses import dataclass
@@ -35,9 +42,18 @@ Handler = Callable[[bytes], Iterable[Out]]
 
 
 def _client(client_id: str):
+    """A paho client with the broker account and TLS from the environment (pdm_common.broker):
+    "pdm-<service>" gets PDM_MQTT_USER_<SERVICE>, any id falls back to PDM_MQTT_USER."""
     import paho.mqtt.client as mqtt
 
-    return mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+    from pdm_common import broker
+
+    options = broker.client_options(client_id.removeprefix("pdm-"))
+    persistent = bool(client_id) and os.environ.get("PDM_MQTT_PERSISTENT", "").strip() in ("1", "true", "yes")
+    extra = {"clean_session": False} if persistent else {}
+    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, **extra)
+    broker.apply(client, options)
+    return client
 
 
 def run_service(
@@ -68,7 +84,8 @@ def run_service(
     client = _client(f"pdm-{name}")
     M = metrics.service_metrics(name)
     M.set_up(False)
-    server = metrics.serve(metrics.REGISTRY, metrics.port_for(name), service=name, health=client.is_connected)
+    server = metrics.serve(metrics.REGISTRY, metrics.port_for(name), os.environ.get("PDM_METRICS_HOST", "127.0.0.1"),
+                           service=name, health=client.is_connected)
     lock = threading.Lock()          # handlers and on_stop never run concurrently
     stop = threading.Event()
     closing = threading.Event()
@@ -110,6 +127,8 @@ def run_service(
     client.on_message = on_message
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
+    from pdm_common.broker import address
+    host, port = address(host, port)        # PDM_MQTT_HOST / PDM_MQTT_PORT, when set, win over the arguments
     try:
         client.connect(host, port)
     except OSError as exc:
@@ -171,7 +190,8 @@ def read_retained(topic: str, host: str = "localhost", port: int = 1883,
 
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(host, port)
+    from pdm_common.broker import address
+    client.connect(*address(host, port))
     client.loop_start()
     try:
         done.wait(timeout)

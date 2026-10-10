@@ -21,6 +21,7 @@ pip install -e lib     # once per environment; CI does the same
 | `features` | `load_feature_spec()` and `window_features()`: the 42 features declared in the asset's features.yaml, computed by kind through channel roles | ING-12, DET-04 |
 | `stream` | `StreamWindows`: the batch pipeline (freeze mask, grid, windows, features) on a rolling buffer, releasing each window once later data cannot change it; what ingest runs | ING-09 to ING-12 |
 | `catalogue` | `add()`, `find()`: the data catalogue, one JSON line per processed dataset with its lineage | ING-13 |
+| `broker` | `client_options()`, `apply()`, `connect()`, `address()`: the broker account, TLS and address from the environment, for every MQTT client | NFR-06 |
 | `mqtt` | `run_service()`: subscribe, handle, publish at QoS 1, flush on shutdown; `read_retained()` | — |
 | `spot` | `fit_spot()`, `threshold()`, `calibrate_q()`: the SPOT threshold from the GPD tail of healthy scores, q chosen at the budget | DET-05 |
 | `gate` | `gate_params()`, `gate_passes()`, `incidents()`, `gate()`, `lead_at_report()`: the persistence gate as pure functions; `StreamingGate`: the same, one window at a time | INC-01 to INC-04 |

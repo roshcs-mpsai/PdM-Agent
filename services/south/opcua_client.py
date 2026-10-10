@@ -55,6 +55,7 @@ import time
 from collections import Counter
 from typing import Callable, Optional
 
+from pdm_common import broker
 from pdm_common.mqtt import Out
 from pdm_common.profile import ProfileError, load_profile, signal_names
 from pdm_common.timeutil import parse_duration, to_utc
@@ -398,7 +399,7 @@ def main(argv=None) -> None:
     username, password = broker_credentials()
     client = mqtt_client("pdm-south-opcua", username=username, password=password)
     try:
-        client.connect(args.broker, args.port)
+        broker.connect(client, "south", args.broker, args.port)
     except OSError as exc:
         raise SystemExit(f"opcua_client: cannot reach the broker at {args.broker}:{args.port} ({exc})")
     client.loop_start()

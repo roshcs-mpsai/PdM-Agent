@@ -44,6 +44,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Callable, Iterable, Iterator, Optional
 
+from pdm_common import broker
 from pdm_common.profile import ProfileError, digital_names, load_profile, signal_names
 from pdm_common.timeutil import to_utc
 
@@ -348,7 +349,7 @@ def main(argv=None) -> None:
         client = mqtt_client(f"scada-sim-{edge.edge_node}", username=os.environ.get("PDM_SCADA_SIM_MQTT_USER"),
                              password=os.environ.get("PDM_SCADA_SIM_MQTT_PASSWORD"), will=edge.node_death())
         try:
-            client.connect(args.broker, args.port)
+            broker.connect(client, "scada_sim", args.broker, args.port)
         except OSError as exc:
             raise SystemExit(f"scada_sim: cannot reach the broker at {args.broker}:{args.port} ({exc})")
         client.loop_start()

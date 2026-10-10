@@ -37,6 +37,7 @@ from pathlib import Path
 
 import yaml
 
+from pdm_common import broker
 from pdm_common.hashing import canonical_json, sha256_file
 from pdm_common.profile import ProfileError, events_file, load_profile, profile_hash, signal_names
 
@@ -345,7 +346,7 @@ def make_mqtt_publisher(host: str, port: int, qos: int):
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id="pdm-replayer",
     )
-    client.connect(host, port)
+    broker.connect(client, "replayer", host, port)
     client.loop_start()
 
     def publish(topic: str, payload: str) -> None:
