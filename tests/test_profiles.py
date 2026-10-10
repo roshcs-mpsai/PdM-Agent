@@ -45,7 +45,7 @@ def test_asset_profile_invariants():
 def test_asset_profile_v02_decisions():
     """R1a.2: the EDA verification's changes to the profile."""
     p = _load("asset_profile.yaml")
-    assert p["schema_version"] == "0.2"
+    assert p["schema_version"] == "0.3"
     assert p["source_timezone"] == "UTC"          # unbroken through the DST change
     # DV_pressure is flat after the Jun 8 repair: the detector would learn the date
     assert "DV_pressure" not in p["detector"]["inputs"]
@@ -79,8 +79,12 @@ def test_events_invariants():
     assert set(e["guard_band"]) == {"before", "after"}
     assert set(e["healthy_buffer"]) == {"before_failure", "after_repair"}
     assert len(e["lead_horizons"]) == 3
-    assert len(e.get("uncertain_periods", [])) >= 9
+    # v0.3: the eight unreported continuous-load runs of March (EDA v4 5.1)
+    assert len(e.get("uncertain_periods", [])) == 8
     assert len(e["data_quality_masks"]) == 10
+    # v0.3: the expert's 21 failures are the second label source, to the minute
+    assert [x["n"] for x in e["expert_reported"]] == list(range(1, 22))
+    assert set(e["expert_band"]) == {"before", "after"}
 
 
 def test_events_maintenance_hours_from_the_pdf():
@@ -108,13 +112,15 @@ def test_freeze_masks_are_the_ten_verified_runs():
 
 
 def test_uncertain_periods_rebuilt_from_the_episodes():
+    """v0.3: the lps_heavy periods are gone (a coverage artefact, EDA v4 4); the
+    uncertain periods are the eight March runs of 30 min or more with no report."""
     e = _load("events.yaml")
     periods = e["uncertain_periods"]
     tags = [p["tag"] for p in periods]
-    assert set(tags) == {"lps_heavy", "load_held", "probable_leak"}
-    assert tags.count("lps_heavy") == 3
-    assert tags.count("load_held") == 3
-    assert tags.count("probable_leak") == 3
+    assert set(tags) == {"load_held", "probable_leak"}
+    assert tags.count("load_held") == 4
+    assert tags.count("probable_leak") == 4
+    assert all(to_utc(p["start"]).month == 3 for p in periods)
     # the Jun 12-14 and Jul 24-26 entries were logger-freeze artifacts
     for start, end in [("2020-06-12", "2020-06-15"), ("2020-07-24", "2020-07-27")]:
         artifact = (to_utc(start), to_utc(end))
@@ -140,7 +146,7 @@ def test_healthy_candidates_are_clear_of_every_exclusion():
     period, and no failure buffer (7 d before the report to 48 h after repair)."""
     e = _load("events.yaml")
     ids = [c["id"] for c in e["healthy_candidates"]]
-    assert "H5" not in ids                       # 0 of 394 windows survive
+    assert ids == ["H1", "H2", "H3", "H4", "H5", "H6", "H7"]   # v0.3: H1 and H5 return
     assert not any("conflict" in c for c in e["healthy_candidates"])
 
     before = parse_duration(e["healthy_buffer"]["before_failure"])
@@ -151,6 +157,11 @@ def test_healthy_candidates_are_clear_of_every_exclusion():
     for f in e["failures"]:
         repair = f["maintenance"] if f["maintenance"] is not None else f["end"]
         blocked.append((to_utc(f["start"]) - before, to_utc(repair) + after))
+    band_before = parse_duration(e["expert_band"]["before"])
+    band_after = parse_duration(e["expert_band"]["after"])
+    for x in e["expert_reported"]:
+        end = to_utc(x["end"]) + dt.timedelta(minutes=1)
+        blocked.append((to_utc(x["start"]) - band_before, end + band_after))
 
     step = pd.Timedelta(minutes=1)
     for c in e["healthy_candidates"]:

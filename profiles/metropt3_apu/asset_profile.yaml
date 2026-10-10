@@ -1,4 +1,4 @@
-# asset_profile.yaml -- v0.2 (2026-09-30, Rosh)
+# asset_profile.yaml -- v0.3 (2026-10-10, Rosh)
 # Single source of asset-specific configuration (PR-04). All downstream
 # components read this file; no MetroPT-specific names in shared code.
 # Validated at start-up against pdm_common.schema.AssetProfile (CFG-02): a
@@ -10,8 +10,12 @@
 #       the detector inputs, load-share features in place of comp_cycle_rate
 #       (a logger-freeze artifact), and the digital-channel verdicts from the
 #       verification.
+# v0.3: schema 0.3 -- the prognosis, incident and device topics, the feature
+#       declaration file (features.yaml) as a reference, the prognosis horizons
+#       and the drift windows from the FRD/HLD (sections 4.4, 4.10), and the
+#       consistency checks as structured entries the registry reads.
 
-schema_version: "0.2"
+schema_version: "0.3"
 
 asset:
   id: metropt3_apu
@@ -64,6 +68,9 @@ topics:                       # FRD section 9 topic tree; QoS 1, canonical JSON
   windows: pdm/metropt3_apu/windows
   scores: pdm/metropt3_apu/scores
   status: pdm/metropt3_apu/status      # retained
+  prognosis: pdm/metropt3_apu/prognosis   # retained
+  incidents: pdm/metropt3_apu/incidents
+  device: pdm/metropt3_apu/device         # G8 stretch: device_event_v1
 
 signals:
   analog:                     # plausibility ranges from observed min/max, rounded out
@@ -130,14 +137,33 @@ detector:
 
 consistency_checks:            # deterministic checks registry (PR-10), Journey C
   - name: tp3_reservoirs_divergence
+    id: C9
+    kind: instrument
     rule: "abs(TP3 - Reservoirs) > 0.1 bar sustained over 10 min"
+    threshold: 0.1
+    unit: bar
+    params: {sustain: 10min}
     meaning: "instrumentation fault on one pressure channel, not a process fault"
     note: "never fires on the 2020 data (p99.9 difference 0.010 bar); Journey C needs injected faults"
   - name: digital_polarity_audit
+    id: C10
+    kind: instrument
     rule: "suspect_inverted channels: verify eventful state from transitions in failure windows"
     status: open
 
 references:
   events_file: events.yaml
-  skills_folder: skills/apu_metropt3     # PR-11 stub
-  checks_registry: checks/apu_metropt3   # PR-10 stub
+  features_file: features.yaml           # every window feature, its kind and parameters
+  skills_folder: skills/apu_metropt3     # PR-11
+  checks_registry: checks/apu_metropt3   # PR-10
+
+prognosis:                     # PRG-01, PRG-02 (FRD 4.4): the planner's horizons, not detection lead
+  horizons: [24h, 72h, 168h]
+  cadence: 1h                  # stream time
+  history: 24h                 # score history the hourly row reads
+  interval: 0.9                # every probability carries a 90 % interval
+
+drift:                         # OPS-04 (FRD 4.10): Wasserstein distance per regime
+  window: 24h                  # the last 24 simulated hours ...
+  every: 6h                    # ... against the healthy reference, every 6 simulated hours
+  signals: [TP2, TP3, H1, Oil_temperature, Motor_current]

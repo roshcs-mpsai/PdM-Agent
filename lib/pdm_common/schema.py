@@ -1,4 +1,4 @@
-"""Asset profile schema, version 0.2 (CFG-02, CFG-08).
+"""Asset profile schema, version 0.3 (CFG-02, CFG-08).
 
 ``validate_profile`` checks a loaded profile against ``AssetProfile`` and
 then against the cross-field rules pydantic cannot see field by field
@@ -9,6 +9,12 @@ service with an error that points at the line to fix.
 
 New keys arrive through a schema version bump: every model forbids keys it
 does not declare.
+
+0.3 (Oct 2026) adds what the R1-R2 services read from the profile: the
+prognosis, incident and device topics, the feature-declaration file next to
+the profile (``references.features_file``), structured consistency checks
+with their thresholds (the checks registry, PR-10), the prognosis horizons,
+the drift job's windows and the southbound tag mapping (ING-14).
 """
 from __future__ import annotations
 
@@ -21,7 +27,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationErr
 
 from pdm_common.timeutil import parse_duration, timezone
 
-SCHEMA_VERSION = "0.2"
+SCHEMA_VERSION = "0.3"
 
 
 def _duration(text: str) -> str:
@@ -129,6 +135,9 @@ class Topics(_Strict):
     windows: str
     scores: str
     status: str
+    prognosis: str
+    incidents: str
+    device: str
 
 
 class AnalogSignal(_Strict):
@@ -186,8 +195,17 @@ class Detector(_Strict):
 
 
 class ConsistencyCheck(_Strict):
+    """One entry of the checks registry (PR-10). Thresholds are data: they are
+    recomputed from healthy operation by tools/calibrate_checks.py, never
+    typed in to fit an event."""
     name: str
+    id: Optional[str] = Field(default=None, pattern=r"^C[0-9]+$")
+    kind: Optional[Literal["data_quality", "fault_signature", "instrument"]] = None
     rule: str
+    threshold: Optional[float] = None
+    unit: Optional[str] = None
+    params: dict[str, float | int | str] = {}
+    source: Optional[str] = None
     meaning: Optional[str] = None
     note: Optional[str] = None
     status: Optional[str] = None
@@ -195,12 +213,48 @@ class ConsistencyCheck(_Strict):
 
 class References(_Strict):
     events_file: str
+    features_file: str
     skills_folder: str
     checks_registry: str
 
 
+class Prognosis(_Strict):
+    """PRG-01, PRG-02: the planner's horizons, the cadence in stream time and
+    the interval every probability carries."""
+    horizons: list[Duration] = Field(min_length=1)
+    cadence: Duration
+    history: Duration
+    interval: Fraction
+
+
+class Drift(_Strict):
+    """OPS-04: compare the last ``window`` with the healthy reference every ``every``."""
+    window: Duration
+    every: Duration
+    signals: list[str] = Field(min_length=1)
+
+
+class OpcUaSouth(_Strict):
+    endpoint: str
+    publishing_interval: Duration
+    tags: dict[str, str]              # OPC UA node id -> profile signal
+
+
+class SparkplugSouth(_Strict):
+    group: str
+    edge_node: str
+    device: str
+    metrics: dict[str, str]           # Sparkplug metric name -> profile signal
+
+
+class South(_Strict):
+    """ING-14: how southbound sources map onto the profile's signals."""
+    opcua: Optional[OpcUaSouth] = None
+    sparkplug: Optional[SparkplugSouth] = None
+
+
 class AssetProfile(_Strict):
-    schema_version: Literal["0.2"]
+    schema_version: Literal["0.3"]
     asset: Asset
     source_timezone: Annotated[str, AfterValidator(_timezone)]
     sampling: Sampling
@@ -215,6 +269,9 @@ class AssetProfile(_Strict):
     detector: Detector
     consistency_checks: list[ConsistencyCheck] = []
     references: References
+    prognosis: Optional[Prognosis] = None
+    drift: Optional[Drift] = None
+    south: Optional[South] = None
 
 
 def _items(data, *keys) -> list:
@@ -267,10 +324,29 @@ def cross_check(data: dict) -> list[tuple[tuple, str]]:
     asset = data.get("asset")
     asset_id = asset.get("id") if isinstance(asset, dict) else None
     topics = data.get("topics") if isinstance(data.get("topics"), dict) else {}
-    for key in ("telemetry", "windows", "scores", "status"):
+    for key in ("telemetry", "windows", "scores", "status", "prognosis", "incidents", "device"):
         topic = topics.get(key)
         if isinstance(asset_id, str) and isinstance(topic, str) and asset_id not in topic.split("/"):
             problems.append((("topics", key), f"topic {topic!r} does not name asset {asset_id!r}"))
+    for i, check in enumerate(_items(data, "consistency_checks")):
+        cid = check.get("id") if isinstance(check, dict) else None
+        if isinstance(cid, str) and [c.get("id") for c in _items(data, "consistency_checks")
+                                     if isinstance(c, dict)].count(cid) > 1:
+            problems.append((("consistency_checks", i, "id"), f"check id {cid!r} is used twice"))
+
+    drift = data.get("drift") if isinstance(data.get("drift"), dict) else {}
+    for i, name in enumerate(drift.get("signals") or []):
+        if isinstance(name, str) and name not in names:
+            problems.append((("drift", "signals", i), f"{name!r} is not a signal of this profile"))
+
+    south = data.get("south") if isinstance(data.get("south"), dict) else {}
+    for source, mapping_key in (("opcua", "tags"), ("sparkplug", "metrics")):
+        block = south.get(source) if isinstance(south.get(source), dict) else {}
+        mapping = block.get(mapping_key) if isinstance(block.get(mapping_key), dict) else {}
+        for tag, signal in mapping.items():
+            if isinstance(signal, str) and signal not in names:
+                problems.append((("south", source, mapping_key, tag),
+                                 f"{signal!r} is not a signal of this profile"))
     return problems
 
 

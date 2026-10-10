@@ -1,6 +1,6 @@
-# A toy asset that satisfies schema 0.2 with as little as possible.
+# A toy asset that satisfies schema 0.3 with as little as possible.
 # tests/test_schema.py loads it as the valid twin of malformed_asset_profile.yaml.
-schema_version: "0.2"
+schema_version: "0.3"
 asset:
   id: demo_pump
   description: "toy asset for schema tests"
@@ -23,6 +23,9 @@ topics:
   windows: pdm/demo_pump/windows
   scores: pdm/demo_pump/scores
   status: pdm/demo_pump/status
+  prognosis: pdm/demo_pump/prognosis
+  incidents: pdm/demo_pump/incidents
+  device: pdm/demo_pump/device
 signals:
   analog:
     - {name: flow, unit: m3/h, range: [0.0, 50.0], desc: "outlet flow"}
@@ -36,4 +39,5 @@ detector:
     - {name: run_share_1h, kind: share_of_time, signal: flow, above: 1.0, window: 1h, desc: "share of time pumping"}
   fit_on: healthy_windows
   score: per_signal_reconstruction_error
-references: {events_file: events.yaml, skills_folder: skills/demo_pump, checks_registry: checks/demo_pump}
+references: {events_file: events.yaml, features_file: features.yaml, skills_folder: skills/demo_pump,
+             checks_registry: checks/demo_pump}
