@@ -13,7 +13,7 @@ lands (build order and owners are in the construction plan).
 | mcp_server | Six-tool MCP server + checks dispatch | R2 |
 | agent | LangGraph loop, brief schema | R2 |
 | dashboard | Streamlit operator dashboard + approval store | R0 stub, R2 |
-| opcua_north | Northbound OPC UA server, NE 107 | R2 |
+| opcua_north | Read-only northbound OPC UA server: score, prognosis with bounds, NE 107, incident, versions | R2 |
 | connector | REST work-order connector | R2 |
 | south | Southbound adapters: Sparkplug B and OPC UA client to telemetry_json_v1, the simulated SCADA; read-only CIP client (G8 stretch) | R2; R4 stretch |
 
