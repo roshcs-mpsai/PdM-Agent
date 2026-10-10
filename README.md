@@ -54,28 +54,27 @@ docker compose up -d               # Mosquitto broker (walking skeleton)
 jupyter lab notebooks/metropt3_eda.ipynb   # downloads the dataset on first run
 ```
 
-## Run the walking skeleton (R0)
+## Run the stream (replayer -> ingest -> detector)
 
-A replayed record travels replayer -> ingest -> z-score detector -> retained
-status -> status board, with a log line per window at every hop. One
-terminal per service, from the repository root:
+A replayed record travels replayer -> ingest (10-minute windows and their
+features) -> frozen detector (scores), with a log line per window at every
+hop. One terminal per service, from the repository root:
 
 ```bash
 P=profiles/metropt3_apu/asset_profile.yaml
-docker compose up -d                                         # broker on localhost:1883
-python services/detector/zscore.py --profile $P --fit \
-  --data "data/MetroPT3(AirCompressor).csv" --candidate H4   # once: fit on healthy H4
+docker compose up -d mosquitto                               # broker on localhost:1883
 python services/ingest/ingest.py --profile $P
-python services/detector/zscore.py --profile $P
-streamlit run services/dashboard/app.py                      # or: python services/dashboard/status_view.py --watch 2
+python services/detector/detector.py --profile $P            # loads only the bundles eval/config.yaml pins
 python services/replayer/replayer.py --profile $P \
-  --data "data/MetroPT3(AirCompressor).csv" --speed 1000 --limit 5000
+  --data "data/MetroPT3(AirCompressor).csv" --speed 1000 --from 2020-07-14T00:00:00 --to 2020-07-15T20:00:00
 ```
 
-Ctrl-C on ingest prints its reconciliation (in = accepted + quarantined).
-To watch the status turn amber, replay the F4 lead-up instead:
-`--from 2020-07-15T10:00:00 --to 2020-07-15T20:00:00`.
-The same chain runs as a test: `PDM_TEST_BROKER=localhost:1883 pytest -q -m e2e`.
+Ctrl-C on ingest prints its reconciliation (in = accepted + quarantined,
+windows = complete + dropped). The span above is the F4 lead-up (reported at
+14:30 on Jul 15); in the evaluated scores the detector alerts continuously from
+about 00:30 that day. The seven-day features need seven days of stream, so for
+scores identical to the evaluation start the replay a week earlier. The same
+chain runs as a test: `PDM_TEST_BROKER=localhost:1883 pytest -q -m e2e`.
 
 ## Start MLflow (the model registry)
 

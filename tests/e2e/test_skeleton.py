@@ -1,15 +1,15 @@
-"""R0.6 walking skeleton, end to end against a live broker.
+"""The walking skeleton, end to end against a live broker (R0.6, carried to R1).
 
-replayer -> ingest -> z-score detector -> retained status -> status view,
-each as its own process, exactly as they run on a laptop. Proves that a
-replayed record appears as a health status, with a log line per window at
-every hop and counts that reconcile.
+replayer -> ingest -> frozen detector, each as its own process, exactly as
+they run on a laptop. Proves that replayed records become 10-minute windows
+and scores, with a log line per window at every hop and counts that
+reconcile. The gate and the status view join in tests/e2e/test_status.py.
 
 Needs a broker:  docker compose up -d
 Run:             PDM_TEST_BROKER=localhost:1883 pytest -q -m e2e
 
-Synthetic data and a synthetic model keep it independent of the dataset;
-nothing here names a MetroPT signal.
+Synthetic data keeps it independent of the dataset (the detector is the
+frozen bundle in eval/frozen); nothing here names a MetroPT signal.
 """
 import datetime as dt
 import json
@@ -22,13 +22,13 @@ from pathlib import Path
 
 import pytest
 
-from pdm_common.hashing import canonical_json
-from pdm_common.profile import load_profile, profile_hash, signal_names
+from pdm_common.profile import load_profile
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_PATH = ROOT / "profiles" / "metropt3_apu" / "asset_profile.yaml"
 BROKER = os.environ.get("PDM_TEST_BROKER", "")
-MINUTES = 20
+MINUTES = 30
+WINDOWS = MINUTES - 10 + 1      # 10-minute windows at a 1-minute stride
 
 pytestmark = [
     pytest.mark.e2e,
@@ -42,26 +42,17 @@ def _host_port():
 
 
 def _write_csv(path, profile):
-    names = signal_names(profile)
+    """Values inside every profile range that change every row (no logger freeze)."""
+    analog, digital = profile["signals"]["analog"], profile["signals"]["digital"]
+    names = [s["name"] for s in analog + digital]
     t0 = dt.datetime(2020, 3, 21)
     lines = ["," + ",".join(["timestamp", *names])]
     for k in range(MINUTES * 6):
         ts = t0 + dt.timedelta(seconds=10 * k)
-        values = [f"{10 * i + (k % 6) / 10:.3f}" for i in range(len(names))]
+        values = [f"{s['range'][0] + (s['range'][1] - s['range'][0]) * (0.3 + 0.001 * k):.4f}" for s in analog]
+        values += [f"{k % 2:.1f}" for _ in digital]
         lines.append(f"{k},{ts.isoformat(sep=' ')}," + ",".join(values))
     path.write_text("\n".join(lines) + "\n")
-
-
-def _write_model(path, profile):
-    """Means at the data's level, so scores stay small and the status good."""
-    names = signal_names(profile)
-    channels = {n: {"mean": 10.0 * names.index(n) + 0.25, "std": 1.0}
-                for n in profile["detector"]["inputs"]}
-    model = {"schema": "zscore_model_v1", "detector": "zscore", "asset": profile["asset"]["id"],
-             "channels": channels, "threshold": 4.0, "threshold_rule": "test",
-             "fit": {"candidate": "synthetic", "profile_sha256": profile_hash(PROFILE_PATH)},
-             "in_sample_score": {}}
-    path.write_text(canonical_json(model))
 
 
 def _start(args, log):
@@ -85,39 +76,37 @@ def _stop(proc):
     return json.loads(out.strip().splitlines()[-1])
 
 
-def test_a_replayed_record_reaches_the_status_view(tmp_path):
-    import paho.mqtt.publish as publish
-
+def test_replayed_records_become_windows_and_scores(tmp_path, monkeypatch):
     host, port = _host_port()
     profile = load_profile(PROFILE_PATH)
-    status_topic = profile["topics"]["status"]
-    publish.single(status_topic, payload=None, retain=True, hostname=host, port=port)  # clear
-
-    data, model = tmp_path / "telemetry.csv", tmp_path / "zscore.json"
+    monkeypatch.setenv("PDM_CATALOGUE", str(tmp_path / "catalogue.jsonl"))
+    data = tmp_path / "telemetry.csv"
     _write_csv(data, profile)
-    _write_model(model, profile)
     broker = ["--broker", host, "--port", str(port)]
+    store = ["--store", f"sqlite:///{tmp_path}/pdm.db"]
     ingest_log, detector_log = tmp_path / "ingest.log", tmp_path / "detector.log"
 
-    ingest = _start(["services/ingest/ingest.py", "--profile", str(PROFILE_PATH), *broker,
-                     "--quarantine", str(tmp_path / "quarantine.jsonl")], ingest_log)
-    detector = _start(["services/detector/zscore.py", "--profile", str(PROFILE_PATH), *broker,
-                       "--model", str(model)], detector_log)
+    ingest = _start(["services/ingest/ingest.py", "--profile", str(PROFILE_PATH), *broker, *store,
+                     "--quarantine", str(tmp_path / "quarantine.jsonl"),
+                     "--replay-manifest", str(tmp_path / "manifest.json")], ingest_log)
+    detector = _start(["services/detector/detector.py", "--profile", str(PROFILE_PATH), *broker, *store],
+                      detector_log)
     try:
         _wait_for(ingest_log, "connected to")
         _wait_for(detector_log, "connected to")
 
         replay = subprocess.run(
             [sys.executable, "services/replayer/replayer.py", "--profile", str(PROFILE_PATH),
-             "--data", str(data), *broker, "--speed", "1000000", "--progress-every", "0"],
+             "--data", str(data), *broker, "--speed", "1000000", "--progress-every", "0",
+             "--manifest", str(tmp_path / "manifest.json")],
             cwd=ROOT, capture_output=True, text=True, timeout=60)
         assert replay.returncode == 0, replay.stderr
         assert f"replayed {MINUTES * 6} of {MINUTES * 6} rows" in replay.stdout
 
-        # every minute but the last is closed by the stream; the last on shutdown
-        _wait_for(detector_log, "detector score ", count=MINUTES - 1)
+        # all but the last window are released by the stream; the last on shutdown
+        _wait_for(detector_log, "detector score ", count=WINDOWS - 1)
         counts = _stop(ingest)
-        _wait_for(detector_log, "detector score ", count=MINUTES)
+        _wait_for(detector_log, "detector score ", count=WINDOWS)
         scored = _stop(detector)
     finally:
         for proc in (ingest, detector):
@@ -127,18 +116,11 @@ def test_a_replayed_record_reaches_the_status_view(tmp_path):
     # counts reconcile at the ingest hop, and every window got one score
     assert counts["in"] == counts["accepted"] == MINUTES * 6
     assert counts["quarantined"] == 0 and counts["balanced"]
-    assert counts["windows"] == MINUTES
-    assert scored["windows"] == scored["scored"] == MINUTES and scored["dropped"] == 0
+    assert counts["windows_complete"] == WINDOWS and counts["windows_dropped"] == 0
+    assert scored["windows"] == scored["scored"] == WINDOWS and scored["refused"] == 0
 
-    # a log line per window at every hop
-    assert ingest_log.read_text().count("ingest window ") == MINUTES
-    assert detector_log.read_text().count("detector score ") == MINUTES
-
-    # the status view shows the last window as a health status
-    view = subprocess.run(
-        [sys.executable, "services/dashboard/status_view.py", "--profile", str(PROFILE_PATH), *broker],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert view.returncode == 0, view.stderr
-    assert view.stdout.startswith(profile["asset"]["id"])
-    assert "[green] good" in view.stdout
-    assert "last window 2020-03-21T00:20:00Z" in view.stdout
+    # a log line per score, and the windows in the catalogue with the replay's lineage
+    assert detector_log.read_text().count("detector score ") == WINDOWS
+    entry = json.loads((tmp_path / "catalogue.jsonl").read_text().splitlines()[-1])
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert entry["rows"] == WINDOWS and entry["lineage"]["replay_log_sha256"] == manifest["log_sha256"]

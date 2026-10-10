@@ -1,69 +1,47 @@
 # Detector
 
-R0 ships one detector: a z-score baseline (R0.4, DET-02) that turns each
-window into a score and a status. R1b adds the common detector interface,
-PCA and one deep model behind it, and SPOT thresholds.
-
-## z-score baseline
+Scores every window with the frozen detector: PCA reconstruction error at the
+SPOT threshold, the bundle eval/config.yaml pins (the Week-7 freeze, T30).
 
 ```bash
-# 1. fit once: per-input mean and std of the one-minute means over a
-#    healthy candidate from events.yaml; writes models/<asset_id>/zscore.json
-python services/detector/zscore.py --profile profiles/metropt3_apu/asset_profile.yaml \
-  --fit --data "data/MetroPT3(AirCompressor).csv" --candidate H4
-
-# 2. score the stream: windows in, scores and a retained status out
-python services/detector/zscore.py --profile profiles/metropt3_apu/asset_profile.yaml
+python services/detector/detector.py --profile profiles/metropt3_apu/asset_profile.yaml \
+    [--store "$PDM_STORE"] [--run-id <the frozen run, to refuse anything else>]
 ```
 
-- **Fit data.** The candidate's days (H4 is Mar 21-23, clean in the EDA
-  check), minus its `exclude` spans and any freeze mask, uncertain or grey
-  period. The rows go through `pdm_common.windows.MinuteWindower`, the class
-  the ingest stub publishes with, so the fit sees exactly what it scores.
-  On the full file, H4 gives 4,245 windows from 25,688 rows.
-- **Score.** The largest |z| across `detector.inputs`; the per-input |z|
-  travels with it for attribution (DET-07).
-- **Threshold.** A placeholder: `--threshold` at fit time, default 4.0, and
-  in-sample percentiles are kept in the model file for reference (H4: p99.9
-  is 3.82). SPOT replaces it in R1b. There is no persistence gate yet, so
-  every window above the threshold turns the status amber.
-- **Run ID.** `zscore-<12 hex>`, a hash of the model file's content, stands in
-  for the MLflow run ID until R1b. The model file is not committed (models/
-  is gitignored); refit after any change to the inputs.
+- **Model.** `eval/frozen/<asset>/detector/bundle.json`: the 21 input features,
+  the scaler (healthy median for missing values, mean and standard deviation),
+  the PCA subspace and the threshold. Scoring needs numpy only
+  (`pdm_common.frozen.DetectorModel`), so the service scores exactly as the
+  harness did: tests/test_detector.py streams Apr 1-21, 2020 through ingest and
+  this service and gets the evaluated scores back.
+- **Refusals (DET-08).** It will not start if the bundle, the profile's
+  detector sections, events.yaml or features.yaml differ from the freeze, or if
+  `--run-id` names another run. It refuses a window whose `features_sha256` is
+  not the frozen one, and counts it under `refused_by`.
+- **Missing values** take the healthy median, as in evaluation; the score lists
+  them under `imputed`.
+- **Run ID.** The MLflow run ID once the bundle is registered
+  (tools/register_bundle.py), else `bundle-<first 12 hex of its SHA-256>`.
 
-Each window logs one line:
-
-```text
-detector score 2020-07-15T14:30:00Z 4.27 / 4.00 (top Oil_temperature) alert=True -> out_of_specification
-```
+The R0 z-score service is gone: it scored one-minute means, which ingest no
+longer publishes. The z-score detector stays in the harness as the baseline
+(eval/detectors.py, DET-02).
 
 ## Payload schema -- `score_v1`
 
-On the profile's `topics.scores`, one per window, not retained (DET-06).
+On the profile's `topics.scores`, one per window, not retained (DET-06), and
+one row in the store's `scores` table.
 
 | Field | Meaning |
 |---|---|
 | `schema` | `score_v1` |
-| `asset`, `profile_sha256`, `events_sha256` | asset id and the config hashes in force (CFG-07) |
-| `detector`, `detector_run` | `zscore` and the model's run ID |
+| `asset`, `profile_sha256`, `features_sha256` | asset id and the config hashes in force (CFG-07) |
+| `detector`, `detector_run_id` | `PCA` and the frozen run |
 | `window_start`, `window_end` | the window's bounds, from window_v1 |
-| `score` | aggregate score: the largest per-input error |
-| `errors` | `{input: |z|}` for every detector input |
-| `threshold`, `alert` | the threshold in force and `score > threshold` |
+| `score` | sum of the per-feature squared reconstruction errors (standardised) |
+| `errors` | `{feature: squared error}` for the 21 inputs (DET-07) |
+| `top` | the five largest terms as `[feature, share of the score]` |
+| `imputed` | features that were missing and took the healthy median |
+| `threshold`, `alert` | the frozen threshold and `score > threshold` |
 
-## Payload schema -- `status_v1`
-
-On the profile's `topics.status`, **retained**, so a dashboard or SCADA
-reading it later gets the latest state at once.
-
-| Field | Meaning |
-|---|---|
-| `schema` | `status_v1` |
-| `asset`, `profile_sha256`, `detector_run` | as above |
-| `ts` | stream time of the latest window (its end) |
-| `ne107` | NE 107 state: `good` or, while an alert is active, `out_of_specification` |
-| `score`, `threshold`, `alert` | from the latest score |
-
-The NE 107 vocabulary and the dashboard colours live in
-`pdm_common.status`. The gate service takes over this topic in R2b with the
-full FRD section 8 mapping.
+Alerts become incidents only through the persistence gate (services/gate).
