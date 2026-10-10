@@ -14,3 +14,24 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+
+  mlflow:                                   # T29: the model registry (OPS-05)
+    image: ghcr.io/mlflow/mlflow:v2.16.2
+    container_name: pdm-mlflow
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - mlflow:/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  mlflow: {}

@@ -77,6 +77,19 @@ To watch the status turn amber, replay the F4 lead-up instead:
 `--from 2020-07-15T10:00:00 --to 2020-07-15T20:00:00`.
 The same chain runs as a test: `PDM_TEST_BROKER=localhost:1883 pytest -q -m e2e`.
 
+## Start MLflow (the model registry)
+
+```bash
+docker compose up -d mlflow                      # http://localhost:5000
+export MLFLOW_TRACKING_URI=http://localhost:5000
+python tools/register_bundle.py data/processed_v4/detector_selection --dry-run   # what would be logged
+python tools/register_bundle.py eval/frozen/metropt3_apu/detector \
+    --name pdm-detector-metropt3_apu --alias production                          # prints the run ID
+```
+
+If the image will not start, `mlflow server --backend-store-uri sqlite:///mlruns.db` from the
+virtual environment serves the same API on port 5000.
+
 ## Working agreements
 
 - `main` is protected; changes land by PR with green CI.

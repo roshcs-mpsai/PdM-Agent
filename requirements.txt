@@ -10,3 +10,5 @@ pytest
 # R1: the evaluation harness and the candidate detectors (eval/)
 scikit-learn>=1.5
 scipy>=1.11
+# R1: the model registry (tools/register_bundle.py); the tests skip the MLflow round trip without it
+mlflow>=2.14
