@@ -1,0 +1,9 @@
+# eval/approvers.yaml -- who may approve a model promotion (OPS-07)
+# eval/promote.py accepts an approval only from a name below (case and spacing
+# ignored; `also` lists other spellings of the same person) and never from the
+# person who requested the promotion. Change this file by pull request.
+approvers:
+  - name: Rosh Sreedharan
+    also: [Rosh Chathoth Sreedharan]
+  - name: Ashok Reddy Buthukuri
+  - name: Gayatri Suresh Chaudhari

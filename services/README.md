@@ -15,6 +15,7 @@ lands (build order and owners are in the construction plan).
 | dashboard | Streamlit operator dashboard + approval store | R0 stub, R2 |
 | opcua_north | Read-only northbound OPC UA server: score, prognosis with bounds, NE 107, incident, versions | R2 |
 | connector | REST work-order connector | R2 |
+| drift | Per-signal drift checks against the healthy reference every 6 stream hours; candidate requests | R3 |
 | south | Southbound adapters: Sparkplug B and OPC UA client to telemetry_json_v1, the simulated SCADA; read-only CIP client (G8 stretch) | R2; R4 stretch |
 
 Rule: nothing in here names a MetroPT signal — asset facts come from
