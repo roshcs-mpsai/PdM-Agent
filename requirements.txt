@@ -7,3 +7,6 @@ pyyaml
 pydantic>=2
 paho-mqtt>=2
 pytest
+# R1: the evaluation harness and the candidate detectors (eval/)
+scikit-learn>=1.5
+scipy>=1.11
