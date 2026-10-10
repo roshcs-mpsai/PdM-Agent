@@ -154,6 +154,10 @@ SERVICE: dict[str, dict[str, Spec]] = {
     "connector": {
         "pdm_work_order_posts_total": Spec("counter", "Work-order POST attempts, by outcome (sent, duplicate, "
                                                       "retry, failed)", ("outcome",)),
+        "pdm_work_orders_blocked_total": Spec("counter", "Work orders the connector refused to send, by reason "
+                                                         "(no_approval, tampered, conflict, rejected_by_endpoint)",
+                                              ("reason",)),
+        "pdm_work_orders_pending": Spec("gauge", "Work orders queued or waiting to retry"),
     },
     "opcua_north": {},
     "south": {},

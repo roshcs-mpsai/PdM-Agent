@@ -78,6 +78,8 @@ tests/test_metrics.py fails if they do. Add a metric there first.
 | `pdm_http_request_seconds` | histogram | route, method | api |
 | `pdm_decisions_total` | counter | action | api: approve, edit, reject |
 | `pdm_work_order_posts_total` | counter | outcome | connector: sent, duplicate, retry, failed |
+| `pdm_work_orders_blocked_total` | counter | reason | connector: no_approval, tampered, conflict, rejected_by_endpoint (alert on any increase) |
+| `pdm_work_orders_pending` | gauge | | connector: rows queued or waiting to retry |
 
 Duration histograms use buckets from 1 ms to 10 s with an edge at 2 s, so "p95
 under 2 s" is read off a bucket count rather than interpolated; the agent's run

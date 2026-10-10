@@ -217,8 +217,10 @@ database and broker URLs, private keys, and secret-only files (`.env`, `mosquitt
 
 ## Tokens for the HTTP API and the connector
 
-The HTTP API and the connector are not built yet (there is no services/api, and
-services/connector is a stub). The scheme they should follow:
+The connector (services/connector) presents `PDM_WORKORDER_TOKEN`, or
+`PDM_TOKEN_CONNECTOR` when that is unset, to the work-order endpoint and does not
+start without one. The HTTP API is not built yet (there is no services/api). The
+scheme it should follow:
 
 - Every request carries `Authorization: Bearer <token>`. Tokens come from the environment,
   one per role, at least 32 random characters each:
