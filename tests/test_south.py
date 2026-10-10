@@ -1088,3 +1088,58 @@ def test_the_proposed_profile_section_validates(base):
     opcua_client.OpcUaMapper(data)
     scada_sim.EdgeNodeSim(data)
     scada_sim.OpcUaServerSim(data)
+
+
+def test_the_adapter_loop_reports_its_health_and_metrics(monkeypatch, profile):
+    """run() with a stand-in MQTT client: /health follows the broker connection, a message counts
+    on the standard metrics, and SIGTERM stops the loop and the metrics endpoint."""
+    import signal
+    import threading
+    import urllib.request
+
+    from pdm_common import metrics
+
+    handlers, servers = {}, []
+    monkeypatch.setattr(sp.signal, "signal", lambda sig, fn: handlers.setdefault(sig, fn))
+    real_serve = metrics.serve
+    monkeypatch.setattr(sp.metrics, "serve", lambda reg, port, host, **kw: servers.append(
+        real_serve(reg, 0, "127.0.0.1", **kw)) or servers[-1])
+    seen = {}
+
+    class Client:
+        connected = False
+        on_connect = on_message = on_disconnect = None
+
+        def is_connected(self):
+            return self.connected
+
+        def subscribe(self, *args, **kwargs):
+            pass
+
+        def publish(self, *args, **kwargs):
+            pass
+
+        def loop_start(self):
+            def life():
+                self.connected = True
+                self.on_connect(self, None, None, SimpleNamespace(is_failure=False), None)
+                url = f"http://127.0.0.1:{servers[0].port}"
+                seen["health"] = urllib.request.urlopen(url + "/health").status
+                self.on_message(self, None, SimpleNamespace(topic="spBv1.0/g/NDATA/n", payload=b"\x00junk"))
+                seen["metrics"] = urllib.request.urlopen(url + "/metrics").read().decode()
+                handlers[signal.SIGTERM]()
+            threading.Thread(target=life).start()
+
+        def loop_stop(self):
+            pass
+
+        def disconnect(self):
+            self.connected = False
+
+    monkeypatch.setattr(sp, "mqtt_client", lambda *a, **k: Client())
+    monkeypatch.setattr(sp.broker, "connect", lambda *a, **k: None)
+    sp.run(sp.SparkplugAdapter(profile))
+    assert seen["health"] == 200
+    assert 'pdm_messages_in_total{topic="spBv1.0/NDATA"}' in seen["metrics"]
+    with pytest.raises(OSError):
+        urllib.request.urlopen(f"http://127.0.0.1:{servers[0].port}/health", timeout=1)

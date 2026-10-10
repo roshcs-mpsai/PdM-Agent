@@ -58,7 +58,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Optional
 
-from pdm_common import broker
+from pdm_common import broker, logs, metrics
 from pdm_common.hashing import canonical_json
 from pdm_common.mqtt import Out
 from pdm_common.profile import ProfileError, load_profile, signal_names
@@ -754,17 +754,27 @@ def run(adapter: SparkplugAdapter, *, host: str = "localhost", port: int = 1883,
     publisher = GuardedPublisher(client, {adapter.telemetry_topic}, qos=qos)
     lock = threading.Lock()
     stop = threading.Event()
+    M = metrics.service_metrics("south")
+    M.set_up(False)
+    server = metrics.serve(metrics.REGISTRY, metrics.port_for("south"), os.environ.get("PDM_METRICS_HOST", "127.0.0.1"),
+                           service="south", health=client.is_connected)
 
     def on_connect(client, userdata, flags, reason_code, properties):
         if reason_code.is_failure:
             log.error("broker refused the connection: %s", reason_code)
             return
         client.subscribe(adapter.subscription, qos=qos)
+        M.set_up(True)
         log.info("connected to %s:%s; subscribed to %s", host, port, adapter.subscription)
 
+    def on_disconnect(client, userdata, flags, reason_code, properties):
+        M.set_up(False)
+        log.warning("disconnected from the broker: %s", reason_code)
+
     def on_message(client, userdata, msg):
+        kind = msg.topic.split("/")[2] if msg.topic.count("/") >= 2 else "other"   # NBIRTH, DDATA, ...
         try:
-            with lock:
+            with lock, M.handling(f"spBv1.0/{kind}"):
                 outs = adapter.handle(msg.topic, msg.payload)
         except Exception:                        # a bad message must not stop the adapter
             log.exception("adapter failed on a message from %s", msg.topic)
@@ -772,10 +782,12 @@ def run(adapter: SparkplugAdapter, *, host: str = "localhost", port: int = 1883,
         for out in outs:
             try:
                 publisher.publish(out.topic, out.payload, retain=out.retain)
+                M.messages_out_total.labels(topic=out.topic).inc()
             except CommandRefused as exc:
                 log.error("%s", exc)
 
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
@@ -790,6 +802,9 @@ def run(adapter: SparkplugAdapter, *, host: str = "localhost", port: int = 1883,
     finally:
         client.loop_stop()
         client.disconnect()
+        M.set_up(False)
+        if server is not None:
+            server.close()
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -803,7 +818,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    logs.setup("south")
     try:
         adapter = SparkplugAdapter(load_profile(args.profile))
     except (ProfileError, SouthConfigError) as exc:
