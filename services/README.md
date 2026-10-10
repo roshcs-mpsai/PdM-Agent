@@ -12,6 +12,7 @@ lands (build order and owners are in the construction plan).
 | gate | Persistence gate | R2 |
 | mcp_server | Six-tool MCP server + checks dispatch | R2 |
 | agent | Bounded diagnostic loop (budgets, validation, outage retries, checkpoints); LangGraph form in graph.py | R2 |
+| api | HTTP bridge: reads for the dashboard, reviewer decisions and their audit, the agent's writes | R2 |
 | dashboard | Streamlit operator dashboard + approval store | R0 stub, R2 |
 | opcua_north | Read-only northbound OPC UA server: score, prognosis with bounds, NE 107, incident, versions | R2 |
 | connector | REST work-order connector | R2 |

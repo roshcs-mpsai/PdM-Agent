@@ -12,54 +12,9 @@ awaiting_review), a checkpoint after every step, and the trace at the end.
 """
 from __future__ import annotations
 
-import datetime as dt
 from typing import Optional
 
-from pdm_common import incidents as lifecycle
-from pdm_common.diagnosis import accept_brief
-
-
-def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def claim(store, incident_id: str, trace_id: str) -> bool:
-    try:
-        lifecycle.transition(store, incident_id, "diagnosing", "agent", f"agent run {trace_id} started",
-                             expect="open")
-        return True
-    except lifecycle.IllegalTransition:
-        return False
-
-
-def release(store, incident_id: str, trace_id: str, cause: str) -> bool:
-    return lifecycle.release(store, incident_id, f"agent run {trace_id}: {cause}")
-
-
-def save_checkpoint(store, state: dict) -> None:
-    row = {"incident_id": state["incident_id"], "arm": state["arm"], "node": state["node"], "state": state,
-           "updated_at": _now()}
-    if store.update("agent_checkpoints", {"trace_id": state["trace_id"]}, row) == 0:
-        store.insert("agent_checkpoints", dict(row, trace_id=state["trace_id"]))
-
-
-def unfinished(store, asset_id: Optional[str] = None) -> list[dict]:
-    """Checkpoints of runs that stopped before writing their trace (the agent died mid-run)."""
-    rows = store.query("SELECT c.* FROM agent_checkpoints c WHERE c.node <> ? AND NOT EXISTS "
-                       "(SELECT 1 FROM agent_traces t WHERE t.trace_id = c.trace_id) ORDER BY c.updated_at",
-                       ["end"], table="agent_checkpoints")
-    if asset_id is not None:
-        ids = {r["incident_id"] for r in store.query("SELECT incident_id FROM incidents WHERE asset_id = ?",
-                                                     [asset_id])}
-        rows = [r for r in rows if r["incident_id"] in ids]
-    return rows
-
-
-def outage_tries(store, incident_id: str) -> list[dict]:
-    """The runs on an incident that ended without a brief because the model (or the agent) failed."""
-    return store.query("SELECT trace_id, outcome, finished_at FROM agent_traces WHERE incident_id = ? AND "
-                       "outcome IN (?, ?) ORDER BY finished_at", [incident_id, "model_unavailable", "error"],
-                       table="agent_traces")
+from pdm_common.diagnosis import accept_brief, claim, outage_tries, release, save_checkpoint, unfinished
 
 
 class DirectSink:

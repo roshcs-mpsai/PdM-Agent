@@ -219,25 +219,28 @@ database and broker URLs, private keys, and secret-only files (`.env`, `mosquitt
 
 The connector (services/connector) presents `PDM_WORKORDER_TOKEN`, or
 `PDM_TOKEN_CONNECTOR` when that is unset, to the work-order endpoint and does not
-start without one. The HTTP API is not built yet (there is no services/api). The
-scheme it should follow:
+start without one. The HTTP API (services/api) works as follows:
 
 - Every request carries `Authorization: Bearer <token>`. Tokens come from the environment,
-  one per role, at least 32 random characters each:
+  at least 32 random characters each, one per role or one per person:
 
-  | Role | Variable | Presented by | Allowed (FRD section 9) |
+  | Role | Variables | Presented by | Allowed (FRD section 9) |
   |---|---|---|---|
-  | reviewer | `PDM_TOKEN_REVIEWER` | the dashboard, for a reviewer | reads; `POST /briefs/{id}/decisions` |
-  | engineer | `PDM_TOKEN_ENGINEER` | the dashboard | reads, the audit view |
-  | operator | `PDM_TOKEN_OPERATOR` | the dashboard and tools | reads, the audit view |
-  | agent | `PDM_TOKEN_AGENT` | services/agent | `POST /incidents/{id}/briefs` only |
+  | reviewer | `PDM_TOKEN_REVIEWER`, `PDM_TOKEN_REVIEWER_<NAME>` | the dashboard, for a reviewer | reads; `POST /briefs/{id}/decisions` |
+  | engineer | `PDM_TOKEN_ENGINEER`, `PDM_TOKEN_ENGINEER_<NAME>` | the dashboard | reads, the audit view, traces |
+  | operator | `PDM_TOKEN_OPERATOR`, `PDM_TOKEN_OPERATOR_<NAME>` | the dashboard and tools | reads, the audit view, traces |
+  | evaluator | `PDM_TOKEN_EVALUATOR`, `PDM_TOKEN_EVALUATOR_<NAME>` | the study (T34) | reads, the audit view, traces |
+  | agent | `PDM_TOKEN_AGENT` | services/agent; the MCP tool server checks it too | the agent's endpoints: claim, release, briefs, checkpoints, traces |
   | connector | `PDM_TOKEN_CONNECTOR` | services/connector, to the work-order endpoint | checked by the work-order endpoint; grants nothing on our API |
 
-- The API compares the presented token with each role's token using
+- A named token (`PDM_TOKEN_REVIEWER_ROSH`) is how a person signs in: the dashboard asks
+  for the token, `GET /me` names its holder, and every decision records that name
+  (HIL-07). A role token without a name records the role.
+- The API compares the presented token with every known token using
   `hmac.compare_digest`. No token or an unknown one: 401 with `WWW-Authenticate: Bearer`. A
   known token on an endpoint its role may not use: 403.
-- The API refuses to start when a token is unset, shorter than 32 characters, or the same as
-  another role's.
+- The API refuses to start when no token is set, when a token is shorter than 32
+  characters, or when two variables hold the same token.
 - Tokens never appear in logs, traces or error messages.
 - `/health` and `/metrics` take no token; they are reachable from the core network only (FRD).
 - Make a token with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.

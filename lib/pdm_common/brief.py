@@ -45,6 +45,16 @@ def _citations(brief: dict) -> list[tuple[str, list[str]]]:
     return out
 
 
+def cited(brief: dict) -> list[str]:
+    """Every result id the brief cites, once each, in order of first appearance."""
+    out: list[str] = []
+    for _, ids in _citations(brief):
+        for rid in ids:
+            if rid not in out:
+                out.append(rid)
+    return out
+
+
 def _numbers_in(value) -> list[float]:
     """Every number in a result's output: numeric fields and numbers written inside strings."""
     found = []

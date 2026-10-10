@@ -16,8 +16,9 @@ process (services/agent, its direct sink) or posts it to the API
 A study run (``move=False``: the retrieval-only arm on an incident the live agent
 already diagnosed, T34) is validated and stored the same way and moves nothing.
 
-The agent's run (claim, release and the trace) is recorded by the agent; this module
-is the part the API shares with it.
+The rest of the agent's records -- its claim on the incident (open -> diagnosing, once:
+INC-06), the hand-back when the model is unreachable, the checkpoint after each step --
+are written by the functions below, which the agent's direct sink and the API share.
 """
 from __future__ import annotations
 
@@ -54,6 +55,10 @@ def accept_brief(store, brief: dict, *, trace_id: str, arm: str, at=None, move: 
     incident_id = brief.get("incident_id") if isinstance(brief, dict) else None
     if not incident_id:
         return ["/incident_id: missing"]
+    if not isinstance(brief.get("brief_id"), str) or not brief["brief_id"].startswith("B-"):
+        return ["/brief_id: missing, or not a brief id (B-...); nothing was stored"]
+    if not trace_id:
+        return ["trace_id: missing; a brief belongs to an agent run"]
     results = run_results(store, incident_id, trace_id)
     problems = validate_brief(brief, results, incident_id=incident_id, require_checks=arm != "retrieval_only")
     at = at or dt.datetime.now(dt.timezone.utc)
@@ -83,3 +88,47 @@ def latest_brief(store, incident_id: str, *, valid_only: bool = True) -> dict | 
         sql += " AND valid = ?"
         params.append(True if store.dialect == "postgres" else 1)
     return store.one(sql + " ORDER BY created_at DESC LIMIT 1", params, table="briefs")
+
+
+# --- the agent's run records ---------------------------------------------------------------------
+
+def claim(store, incident_id: str, trace_id: str) -> bool:
+    """open -> diagnosing for this run; False when the incident is not open (another run has it)."""
+    try:
+        lifecycle.transition(store, incident_id, "diagnosing", "agent", f"agent run {trace_id} started",
+                             expect="open")
+        return True
+    except lifecycle.IllegalTransition:
+        return False
+
+
+def release(store, incident_id: str, trace_id: str, cause: str) -> bool:
+    """diagnosing -> open: the run could not finish (the model was unreachable)."""
+    return lifecycle.release(store, incident_id, f"agent run {trace_id}: {cause}")
+
+
+def save_checkpoint(store, state: dict) -> None:
+    """The run's state after a step, replacing the previous checkpoint of the same run."""
+    row = {"incident_id": state["incident_id"], "arm": state["arm"], "node": state["node"], "state": state,
+           "updated_at": dt.datetime.now(dt.timezone.utc)}
+    if store.update("agent_checkpoints", {"trace_id": state["trace_id"]}, row) == 0:
+        store.insert("agent_checkpoints", dict(row, trace_id=state["trace_id"]))
+
+
+def unfinished(store, asset_id: str | None = None) -> list[dict]:
+    """Checkpoints of runs that stopped before writing their trace (the agent died mid-run)."""
+    rows = store.query("SELECT c.* FROM agent_checkpoints c WHERE c.node <> ? AND NOT EXISTS "
+                       "(SELECT 1 FROM agent_traces t WHERE t.trace_id = c.trace_id) ORDER BY c.updated_at",
+                       ["end"], table="agent_checkpoints")
+    if asset_id is not None:
+        ids = {r["incident_id"] for r in store.query("SELECT incident_id FROM incidents WHERE asset_id = ?",
+                                                     [asset_id])}
+        rows = [r for r in rows if r["incident_id"] in ids]
+    return rows
+
+
+def outage_tries(store, incident_id: str) -> list[dict]:
+    """The runs on an incident that ended without a brief because the model (or the agent) failed."""
+    return store.query("SELECT trace_id, outcome, finished_at FROM agent_traces WHERE incident_id = ? AND "
+                       "outcome IN (?, ?) ORDER BY finished_at", [incident_id, "model_unavailable", "error"],
+                       table="agent_traces")
