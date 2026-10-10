@@ -90,6 +90,23 @@ python tools/register_bundle.py eval/frozen/metropt3_apu/detector \
 If the image will not start, `mlflow server --backend-store-uri sqlite:///mlruns.db` from the
 virtual environment serves the same API on port 5000.
 
+## Start the database
+
+```bash
+cp .env.example .env                              # then set PG_PASSWORD
+docker compose up -d postgres                     # TimescaleDB 2.17 on PostgreSQL 16, schema from db/init
+export PDM_STORE="postgresql://pdm:<password>@localhost:5432/pdm"
+python tools/db_benchmark.py --store "$PDM_STORE" # a month of telemetry and the incident join, each under a minute
+```
+
+The schema is declared once, in `lib/pdm_common/store.py`; `db/init/001_schema.sql` is generated from
+it (`python -m pdm_common.store --ddl postgres`) and a test fails if the two disagree. Without
+`PDM_STORE`, everything uses SQLite at `runs/pdm.db`, which is what the tests and the single-process
+pipeline run on. `PDM_TEST_PG=<url of a scratch database> pytest tests/test_store.py` runs the store
+tests against PostgreSQL as well. The init scripts run only when the volume is new; after a schema
+change, apply the regenerated file with `psql -f db/init/001_schema.sql` (new tables and indexes go in
+place; a changed column needs a fresh volume).
+
 ## Working agreements
 
 - `main` is protected; changes land by PR with green CI.

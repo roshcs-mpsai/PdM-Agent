@@ -12,3 +12,5 @@ scikit-learn>=1.5
 scipy>=1.11
 # R1: the model registry (tools/register_bundle.py); the tests skip the MLflow round trip without it
 mlflow>=2.14
+# R2: the store (pdm_common.store); without it everything runs on SQLite
+psycopg[binary]>=3.2
