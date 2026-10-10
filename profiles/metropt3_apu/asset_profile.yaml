@@ -14,6 +14,8 @@
 #       declaration file (features.yaml) as a reference, the prognosis horizons
 #       and the drift windows from the FRD/HLD (sections 4.4, 4.10), and the
 #       consistency checks as structured entries the registry reads.
+#       Oct 10: the checks registry C1-C11 (checks/apu_metropt3), thresholds
+#       from tools/calibrate_checks.py on healthy operation.
 
 schema_version: "0.3"
 
@@ -135,11 +137,73 @@ detector:
   fit_on: healthy_windows      # negative zone of the events.yaml timeline, every regime
   score: per_signal_reconstruction_error
 
-consistency_checks:            # deterministic checks registry (PR-10), Journey C
+consistency_checks:            # deterministic checks registry (PR-10, AGT-05): checks/apu_metropt3
+  # Statistical thresholds come from healthy operation only and are recomputed by
+  # tools/calibrate_checks.py (--check fails when they drift); the rest are rules.
+  # The evidence spans come from the gate and events.yaml gap_edges: 40 min behind
+  # the gate (span + one window), a gap is 30 min without data, a restart is data
+  # resuming less than 55 min (40 + the 15-min edge) before the alarm.
+  - name: data_quality.motor_off_command
+    id: C1
+    kind: data_quality
+    rule: "load commanded (DV_eletric = 1) with Motor_current < 1 A at any point of the opening window"
+    meaning: "a control or data problem, not an asset fault"
+  - name: data_quality.restart
+    id: C2
+    kind: data_quality
+    rule: "data resumed after a gap of 30 min or more less than 55 min before the alarm"
+    unit: min
+    meaning: "a start-up transient"
+  - name: data_quality.bridged_points
+    id: C3
+    kind: data_quality
+    rule: "any interpolated grid point in the 40 min behind the gate"
+    unit: points
+    meaning: "values partly reconstructed"
+  - name: continuous_load_signature
+    id: C4
+    kind: fault_signature
+    rule: "hours_since_rest above its healthy 99th percentile"
+    threshold: 0.1889
+    unit: h
+    source: tools/calibrate_checks.py
+    meaning: "failure in progress"
+  - name: load_share_rise
+    id: C5
+    kind: fault_signature
+    rule: "load_share_6h above its healthy 99th percentile; inconclusive without the share"
+    threshold: 0.2341
+    unit: share
+    source: tools/calibrate_checks.py
+    meaning: "leak precursor"
+  - name: oil_temperature_high
+    id: C6
+    kind: fault_signature
+    rule: "Oil_temperature_mean of the opening window above its healthy 99th percentile"
+    threshold: 70.85
+    unit: degC
+    source: tools/calibrate_checks.py
+    meaning: "thermal stress under continuous load"
+  - name: lps_activity
+    id: C7
+    kind: fault_signature
+    rule: "LPS active minutes in the past 24 h (lps_minutes_24h) above its healthy 99th percentile"
+    threshold: 28.0
+    unit: min
+    source: tools/calibrate_checks.py
+    meaning: "low-pressure episodes"
+  - name: leak_down
+    id: C8
+    kind: fault_signature
+    rule: "TP3 lost per hour across a gap that ended in the past 6 h (the gate hold-off), above healthy gaps' 99th percentile; inconclusive with no such gap"
+    threshold: 4.053
+    unit: bar/h
+    source: tools/calibrate_checks.py
+    meaning: "an air leak while stopped"
   - name: tp3_reservoirs_divergence
     id: C9
     kind: instrument
-    rule: "abs(TP3 - Reservoirs) > 0.1 bar sustained over 10 min"
+    rule: "abs(TP3 - Reservoirs) > 0.1 bar sustained over 10 min in the 40 min behind the gate"
     threshold: 0.1
     unit: bar
     params: {sustain: 10min}
@@ -150,6 +214,17 @@ consistency_checks:            # deterministic checks registry (PR-10), Journey 
     kind: instrument
     rule: "suspect_inverted channels: verify eventful state from transitions in failure windows"
     status: open
+    meaning: "which digital channels to trust"
+  - name: refill_rate
+    id: C11
+    kind: fault_signature
+    rule: "after a restart (C2), TP3 rise per minute while Motor_current > 4.5 A and TP3 < 9.5 bar, from data resuming to the alarm and within 24 min, below healthy restarts' 10th percentile; needs 5 min of such data"
+    threshold: 0.1773
+    unit: bar/min
+    params: {loaded_above_a: 4.5, cut_out_bar: 9.5, min_minutes: 5}
+    source: tools/calibrate_checks.py
+    meaning: "a slow refill: air lost while charging"
+    note: "A4's rule (Oct 3), designed after reading the LLM's answers: in-sample, evidence only"
 
 references:
   events_file: events.yaml
