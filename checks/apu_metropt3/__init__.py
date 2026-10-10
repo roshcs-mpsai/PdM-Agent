@@ -121,11 +121,13 @@ def tp3_reservoirs_divergence(ev: Evidence) -> CheckResult:
     The two track each other at r = 1.00 in healthy data, so a sustained gap points to one sensor."""
     limit = ev.threshold("C9")
     sustain = int(_minutes(ev.param("C9", "sustain", "10min")) * ev.points_per_minute)
+    rows = ev.behind()
+    if rows.stop <= rows.start:
+        return ev.result("C9", "inconclusive", "no data behind the gate")
     tp3, res = ev.channel("TP3"), ev.grid["Reservoirs"].to_numpy(float)
     with np.errstate(invalid="ignore"):
         apart = ev.valid & (np.abs(tp3 - res) > limit)
     run = np.convolve(apart.astype(int), np.ones(sustain, int), mode="full")[:len(apart)] == sustain
-    rows = ev.behind()
     fails = bool(run[rows].any())
     widest = np.nanmax(np.abs(tp3[rows] - res[rows])) if np.isfinite(tp3[rows]).any() else np.nan
     return ev.result("C9", "fail" if fails else "pass",
