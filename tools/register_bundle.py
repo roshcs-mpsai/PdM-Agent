@@ -20,9 +20,10 @@ alias (``production``) at the new version. It prints the run ID, which goes
 into ``eval/config.yaml`` (T30). ``--dry-run`` prints the parameters, metrics
 and artifacts without MLflow, so the mapping is testable anywhere.
 
-MLflow refuses nothing here on its own: promotion of a production alias
-after the freeze goes through ``eval/promote.py`` (OPS-07), which checks for
-a recorded team approval.
+``--alias production`` is accepted only for a bundle eval/config.yaml pins
+(registering the freeze itself). Any other move of the production alias goes
+through ``eval/promote.py`` (OPS-07), which checks for a recorded team
+approval and the evaluation lock.
 """
 from __future__ import annotations
 
@@ -161,6 +162,23 @@ def register(folder: Path, experiment: str, name: str | None, alias: str | None,
     return run_id
 
 
+def production_allowed(folder: Path, config_path: Path = ROOT / "eval" / "config.yaml") -> str | None:
+    """None when ``folder`` holds a bundle the freeze pins, else why the production alias is refused."""
+    import yaml
+    record = folder / "bundle.json"
+    if not record.exists():
+        return f"{folder} holds no bundle.json; only a frozen bundle may be registered as production"
+    try:
+        frozen = (yaml.safe_load(config_path.read_text()) or {}).get("frozen") or {}
+    except OSError as exc:
+        return f"cannot read {config_path}: {exc}"
+    pinned = {(frozen.get(k) or {}).get("bundle_sha256") for k in ("detector", "survival")}
+    if sha256_file(record) in pinned:
+        return None
+    return (f"{record} is not a bundle eval/config.yaml pins; move the production alias with eval/promote.py, "
+            "which needs a recorded team approval (OPS-07)")
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("folder", help="bundle folder")
@@ -171,6 +189,11 @@ def main(argv=None) -> int:
     p.add_argument("--dry-run", action="store_true", help="print what would be logged; no MLflow needed")
     args = p.parse_args(argv)
     folder = Path(args.folder)
+    if args.alias == "production":
+        reason = production_allowed(folder)
+        if reason:
+            print(f"refused: {reason}", file=sys.stderr)
+            return 2
     if args.dry_run:
         print(json.dumps(describe(folder), indent=2))
         return 0

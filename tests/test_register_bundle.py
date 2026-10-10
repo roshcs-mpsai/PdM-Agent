@@ -73,3 +73,17 @@ def test_round_trip_through_mlflow(bundle, tmp_path, monkeypatch):
     assert run.data.params["detector"] == "PCA"
     assert run.data.metrics["lead_h_F4"] == pytest.approx(13.83)
     assert run.data.tags["pdm.bundle_kind"] == "selection_json"
+
+
+def test_production_alias_only_for_a_frozen_bundle(tmp_path):
+    """OPS-07: register_bundle moves the production alias only for the bundles the freeze
+    pins; anything else is refused before MLflow is touched (eval/promote.py is the path)."""
+    import shutil
+    frozen = ROOT / "eval" / "frozen" / "metropt3_apu" / "detector"
+    assert register_bundle.production_allowed(frozen) is None
+    other = tmp_path / "candidate"
+    shutil.copytree(frozen, other)
+    bundle = other / "bundle.json"
+    bundle.write_text(bundle.read_text().replace('"PCA"', '"PCA-candidate"', 1))
+    assert "eval/promote.py" in register_bundle.production_allowed(other)
+    assert register_bundle.main([str(other), "--name", "pdm-detector-x", "--alias", "production"]) == 2
