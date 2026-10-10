@@ -164,3 +164,73 @@ def test_round_trip_against_live_broker(profile, synthetic_csv, tmp_path):
 
     assert counts["published"] == 12
     assert received == log.read_text().splitlines()
+
+
+# --- the replay manifest and fault injection (ING-05, Journey C) ---------------------------
+
+def _faults(profile, entries):
+    return replayer.Faults({"schema": "faults_v1", "faults": entries}, replayer.signal_names(profile))
+
+
+def test_manifest_records_inputs_and_is_stable(tmp_path, profile, synthetic_csv):
+    manifests = []
+    for name in ("a", "b"):
+        counts = replayer.replay(profile, synthetic_csv, None, speed=1e9, log_path=tmp_path / f"{name}.log",
+                                 manifest_path=tmp_path / f"{name}.json", profile_path=PROFILE_PATH,
+                                 arguments={"speed": 1e9})
+        m = json.loads((tmp_path / f"{name}.json").read_text())
+        manifests.append(m)
+        import hashlib
+        assert m["log_sha256"] == hashlib.sha256((tmp_path / f"{name}.log").read_bytes()).hexdigest()
+        assert m["log_sha256"] == counts["log_sha256"]
+    a, b = ({k: v for k, v in m.items() if k != "written_at"} for m in manifests)
+    assert a == b
+    assert a["schema"] == "replay_manifest_v1" and a["published"] == a["messages"] == 12
+    assert len(a["data_sha256"]) == 64 and len(a["profile_sha256"]) == 64 and len(a["events_sha256"]) == 64
+    assert a["first_ts"] == "2020-02-01T00:00:00" and a["last_ts"] == "2020-02-01T00:01:50"
+
+
+def test_value_faults_change_one_signal(profile, synthetic_csv, tmp_path):
+    sig = replayer.signal_names(profile)[1]
+    faults = _faults(profile, [
+        {"kind": "offset", "signal": sig, "from": "2020-02-01T00:00:20", "to": "2020-02-01T00:00:40", "value": 5},
+        {"kind": "stuck", "signal": sig, "from": "2020-02-01T00:01:00", "to": "2020-02-01T00:01:30"},
+        {"kind": "set", "signal": sig, "at": "2020-02-01T00:01:35", "value": 99.0},
+    ])
+    clean, faulty = tmp_path / "clean.log", tmp_path / "faulty.log"
+    replayer.replay(profile, synthetic_csv, None, speed=1e9, log_path=clean)
+    replayer.replay(profile, synthetic_csv, None, speed=1e9, log_path=faulty, faults=faults)
+    read = lambda p: [json.loads(line.split(" ", 1)[1]) for p_ in [p] for line in p_.read_text().splitlines()]  # noqa: E731
+    a, b = read(clean), read(faulty)
+    diff = {m["seq"]: (m["signals"][sig], n["signals"][sig]) for m, n in zip(a, b) if m != n}
+    assert {k: v[1] - v[0] for k, v in diff.items() if k in (2, 3)} == {2: 5.0, 3: 5.0}
+    assert b[7]["signals"][sig] == b[6]["signals"][sig] == b[8]["signals"][sig] == a[6]["signals"][sig]
+    assert b[10]["signals"][sig] == 99.0 and 10 in diff
+    assert all(m["signals"][s] == n["signals"][s] for m, n in zip(a, b) for s in m["signals"] if s != sig)
+    assert faults.applied == {"offset": 2, "drift": 0, "stuck": 3, "set": 1, "drop": 0, "corrupt": 0}
+
+
+def test_drop_leaves_a_seq_gap_and_corrupt_damages_one_message(profile, synthetic_csv, tmp_path):
+    faults = _faults(profile, [
+        {"kind": "drop", "from": "2020-02-01T00:00:30", "to": "2020-02-01T00:00:50"},
+        {"kind": "corrupt", "at": "2020-02-01T00:01:00", "mode": "bad_json"},
+        {"kind": "corrupt", "at": "2020-02-01T00:01:10", "mode": "duplicate"},
+        {"kind": "corrupt", "at": "2020-02-01T00:01:20", "mode": "missing_signal"},
+    ])
+    log = tmp_path / "faulty.log"
+    counts = replayer.replay(profile, synthetic_csv, None, speed=1e9, log_path=log, faults=faults)
+    lines = [line.split(" ", 1)[1] for line in log.read_text().splitlines()]
+    assert counts["dropped"] == 2 and counts["published"] == 10 and counts["messages"] == 11
+    seqs = [json.loads(p)["seq"] for p in lines if p.startswith("{") and p.endswith("}")]
+    assert 3 not in seqs and 4 not in seqs and seqs.count(7) == 2
+    assert sum(1 for p in lines if not p.endswith("}")) == 1                 # the bad_json one
+    missing = [json.loads(p) for p in lines if p.endswith("}") and json.loads(p)["seq"] == 8][0]
+    assert len(missing["signals"]) == len(replayer.signal_names(profile)) - 1
+
+
+def test_faults_file_is_checked(profile):
+    with pytest.raises(replayer.FaultsError, match="not in the profile"):
+        _faults(profile, [{"kind": "offset", "signal": "no_such_signal", "from": "2020-01-01", "to": "2020-01-02",
+                           "value": 1}])
+    with pytest.raises(replayer.FaultsError, match="schema"):
+        replayer.Faults({"faults": []}, replayer.signal_names(profile))

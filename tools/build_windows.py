@@ -21,6 +21,11 @@ exits non-zero, which is how the port is held to the notebook.
 
 ``--from-grid`` starts from a saved grid_10s.csv.gz instead of the raw file
 (about three times faster; the grid step is then skipped).
+
+Every written folder gets an entry in the data catalogue (data/catalogue.jsonl,
+ING-13): rows, columns, the manifest's SHA-256 and the lineage by hash.
+``--catalogue-only`` records an existing folder (such as the notebook's
+data/processed_v4) without rebuilding it.
 """
 from __future__ import annotations
 
@@ -37,6 +42,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
+from pdm_common import catalogue  # noqa: E402
 from pdm_common.events import events_hash, load_events  # noqa: E402
 from pdm_common.features import features_file, load_feature_spec, window_features  # noqa: E402
 from pdm_common.hashing import sha256_file  # noqa: E402
@@ -212,7 +218,19 @@ def write_outputs(result, out: Path) -> dict:
     files = {"grid_10s.csv.gz": {"rows": len(grid), "columns": grid.shape[1]},
              "windows_10min.csv.gz": {"rows": len(windows), "columns": windows.shape[1]}}
     (out / "manifest.json").write_text(json.dumps(manifest(result, files), indent=2))
+    record_in_catalogue(out, result, files)
     return files
+
+
+def record_in_catalogue(out: Path, result, files, path=None) -> dict:
+    """The data-catalogue entry for a written folder (ING-13)."""
+    source = result["source"] or {}
+    lineage = {"raw_file": source.get("file"), "raw_sha256": source.get("sha256"), "raw_rows": source.get("rows"),
+               "profile_sha256": result["hashes"]["profile"], "events_sha256": result["hashes"]["events"],
+               "features_sha256": result["hashes"]["features"], "code": "tools/build_windows.py"}
+    w = files["windows_10min.csv.gz"]
+    return catalogue.add(str(out), "window_table", rows=w["rows"], columns=w["columns"],
+                         manifest_sha256=sha256_file(out / "manifest.json"), lineage=lineage, path=path)
 
 
 def compare(result, reference: Path, tolerance: float = 1e-6, log=print) -> list[str]:
@@ -259,15 +277,42 @@ def compare(result, reference: Path, tolerance: float = 1e-6, log=print) -> list
     return problems
 
 
+def catalogue_existing(folder: Path, data_path=None, path=None) -> dict:
+    """Catalogue a folder written earlier (e.g. by the EDA notebook) from its manifest."""
+    man = json.loads((folder / "manifest.json").read_text())
+    outputs = man.get("outputs") or {}
+    w = outputs.get("windows_10min.csv.gz") or {}
+    if not w:
+        head = pd.read_csv(folder / "windows_10min.csv.gz", nrows=1)
+        w = {"rows": man["expected_counts"]["complete_windows"], "columns": head.shape[1]}
+    source = man.get("source") or {}
+    inputs = man.get("inputs") or {}
+    lineage = {"raw_file": source.get("file"), "raw_sha256": source.get("sha256")
+               or (sha256_file(data_path) if data_path else None),
+               "profile_sha256": inputs.get("profile_sha256"), "events_sha256": inputs.get("events_sha256"),
+               "features_sha256": inputs.get("features_sha256"), "code": man.get("created_by")}
+    return catalogue.add(str(folder), "window_table", rows=w["rows"], columns=w["columns"],
+                         manifest_sha256=sha256_file(folder / "manifest.json"), lineage=lineage, path=path,
+                         note="recorded after the fact from its manifest")
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--profile", default=str(ROOT / "profiles/metropt3_apu/asset_profile.yaml"))
-    src = p.add_mutually_exclusive_group(required=True)
+    src = p.add_mutually_exclusive_group()
     src.add_argument("--data", help="raw telemetry CSV")
     src.add_argument("--from-grid", help="a saved grid_10s.csv.gz")
+    p.add_argument("--catalogue-only", metavar="FOLDER",
+                   help="record an existing output folder in the data catalogue and stop (with --data: hash it)")
     p.add_argument("--out", help="folder to write the outputs to")
     p.add_argument("--check", help="earlier output folder to compare with (e.g. data/processed_v4)")
     args = p.parse_args(argv)
+    if args.catalogue_only:
+        entry = catalogue_existing(Path(args.catalogue_only), args.data)
+        print(json.dumps(entry, indent=2))
+        return 0
+    if not (args.data or args.from_grid):
+        p.error("give --data or --from-grid")
     result = build(args.profile, data_path=args.data, grid_path=args.from_grid)
     w = result["windows"]
     print(f"{len(w):,} complete windows, {int((w.zone == 'negative').sum()):,} negative; "

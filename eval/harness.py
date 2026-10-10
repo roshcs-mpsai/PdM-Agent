@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +61,7 @@ class Data:
     windows_key: str
     failures: dict          # id -> (start, end), naive UTC
     uncertain: list         # (start, end, tag)
+    catalogue: dict | None = None   # the folder's data-catalogue entry (ING-13)
 
 
 def windows_key(window_end) -> str:
@@ -82,7 +84,22 @@ def load(processed) -> Data:
     feature_dict = pd.read_csv(processed / "feature_dictionary.csv")
     failures = {f["id"]: (pd.Timestamp(f["start"]), pd.Timestamp(f["end"])) for f in manifest["zones"]["failures"]}
     uncertain = [(pd.Timestamp(s), pd.Timestamp(e), tag) for s, e, tag in manifest["zones"]["uncertain_periods"]]
-    return Data(processed, windows, manifest, feature_dict, windows_key(windows.window_end), failures, uncertain)
+    data = Data(processed, windows, manifest, feature_dict, windows_key(windows.window_end), failures, uncertain)
+    data.catalogue = catalogue_entry(processed)
+    return data
+
+
+def catalogue_entry(processed: Path) -> dict | None:
+    """The folder's data-catalogue entry (ING-13), matched by its manifest's hash;
+    None, with a warning, when the folder was never recorded."""
+    from pdm_common import catalogue
+    from pdm_common.hashing import sha256_file
+    found = catalogue.find(manifest_sha256=sha256_file(Path(processed) / "manifest.json"))
+    if not found:
+        print(f"warning: {processed} is not in the data catalogue ({catalogue.default_path()}); "
+              f"record it with tools/build_windows.py --catalogue-only {processed}", file=sys.stderr)
+        return None
+    return found[-1]
 
 
 def assign_roles(windows: pd.DataFrame) -> np.ndarray:

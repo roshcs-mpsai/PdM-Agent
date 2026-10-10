@@ -377,6 +377,48 @@ def window_features(grid: pd.DataFrame, ends: np.ndarray, spec: FeatureSpec) -> 
     return pd.DataFrame({name: out[name] for name in spec.names})
 
 
+def retention_anchors(grid: pd.DataFrame, spec: FeatureSpec, upto: int) -> list[pd.Timestamp]:
+    """Grid times that windows ending at or after position ``upto`` may still
+    read beyond the longest fixed look-back.
+
+    Two kinds have none: ``hours_since_below`` reads back to the last stop,
+    and the resumption kinds (``minutes_since_resume``, ``gap_hours``,
+    ``value_at_resume``, ``gap_loss_rate``) read the whole last long gap and
+    the point before it. For each, the anchor is the point a rolling buffer
+    must keep (pdm_common.stream): the last stop at or before ``upto``, and
+    the point before the last long gap that started at or before ``upto``.
+    """
+    g = _Grid(grid, spec)
+    upto = min(int(upto), g.n - 1)
+    if upto < 0:
+        return []
+    positions = []
+
+    def gap_left_edge(pos: int) -> int:
+        """The last valid point before the missing run holding ``pos``."""
+        before = np.flatnonzero(g.valid[:pos])
+        return int(before[-1]) if len(before) else 0
+
+    stop_gaps = set()
+    for f in spec.features:
+        c = f["compute"]
+        kind = c["kind"]
+        if kind == "hours_since_below":
+            long_gap = g.long_gap(spec.bins(c["stop_gap"]))
+            stopped = (g.masked(spec.roles[c["role"]]) < float(c["below"])) | long_gap
+            hits = np.flatnonzero(stopped[:upto + 1])
+            if len(hits):
+                last = int(hits[-1])
+                positions.append(gap_left_edge(last) if long_gap[last] else last)
+        elif "stop_gap" in c:
+            stop_gaps.add(spec.bins(c["stop_gap"]))
+    for stop_bins in stop_gaps:
+        hits = np.flatnonzero(g.long_gap(stop_bins)[:upto + 1])
+        if len(hits):
+            positions.append(gap_left_edge(int(hits[-1])))
+    return [g.t[p] for p in positions]
+
+
 def _summary_name(spec: FeatureSpec, signal: str, stat: str) -> str:
     for f in spec.features:
         c = f["compute"]

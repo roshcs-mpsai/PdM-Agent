@@ -68,6 +68,35 @@ python services/replayer/replayer.py \
 mosquitto_sub -t 'pdm/#' -v
 ```
 
+## Replay manifest (ING-05)
+
+Every run writes `runs/<asset_id>/replay_manifest.json` (change with
+`--manifest`): the data file's name and SHA-256, the profile and events
+hashes, the arguments, the rows read, published, dropped and filtered, the
+first and last timestamps, and the SHA-256 of the message log. The log hash is
+computed whether or not `--log` is given, so two replays can be compared by
+manifest alone; only `written_at` differs between identical replays. Ingest
+takes the manifest (`--replay-manifest`) for the lineage of its catalogue entry.
+
+## Injected faults (`--inject`, Journey C and the ingest tests)
+
+A faults file applies deterministic faults at recorded timestamps; the file's
+name, hash and how often each fault fired go into the manifest. Signal names
+come from the profile, so faults files live with the asset
+(`profiles/<asset_id>/faults/`).
+
+```yaml
+schema: faults_v1
+faults:
+  - {kind: offset, signal: TP3, from: "2020-06-20T10:00:00", to: "2020-06-20T22:00:00", value: 0.6}
+  - {kind: drift,  signal: TP3, from: "...", to: "...", rate_per_h: 0.05}
+  - {kind: stuck,  signal: TP3, from: "...", to: "..."}        # holds the first affected value
+  - {kind: set,    signal: Oil_temperature, at: "...", value: 250}   # one reading (out of range)
+  - {kind: drop,   from: "...", to: "..."}                      # rows not sent; seq still advances
+  - {kind: corrupt, at: "...", mode: bad_json}   # or wrong_schema, wrong_asset, missing_signal,
+                                                 # non_numeric (with signal), duplicate, stale
+```
+
 Recorded gaps (the dataset has 331, up to days long) are capped at
 `--max-wait` wall seconds per step so a replay never stalls; a capped gap
 changes pacing only, not content.

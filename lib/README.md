@@ -19,6 +19,8 @@ pip install -e lib     # once per environment; CI does the same
 | `zones` | `zone_scheme()`, `gap_edges()`, `zone_codes()`, `label_grid()`, `regime_of()`: one zone per grid point by the events.yaml precedence | CFG-05 |
 | `windows` | `window_ends()`, `make_windows()`, `add_folds()`: 10-minute windows at a 1-minute stride, complete or dropped, with zone, regime, test blocks, look-back flags and the fit / calibrate / check role; `MinuteWindower` for the R0 z-score | ING-11 |
 | `features` | `load_feature_spec()` and `window_features()`: the 42 features declared in the asset's features.yaml, computed by kind through channel roles | ING-12, DET-04 |
+| `stream` | `StreamWindows`: the batch pipeline (freeze mask, grid, windows, features) on a rolling buffer, releasing each window once later data cannot change it; what ingest runs | ING-09 to ING-12 |
+| `catalogue` | `add()`, `find()`: the data catalogue, one JSON line per processed dataset with its lineage | ING-13 |
 | `mqtt` | `run_service()`: subscribe, handle, publish at QoS 1, flush on shutdown; `read_retained()` | — |
 | `spot` | `fit_spot()`, `threshold()`, `calibrate_q()`: the SPOT threshold from the GPD tail of healthy scores, q chosen at the budget | DET-05 |
 | `gate` | `gate_params()`, `gate_passes()`, `incidents()`, `gate()`, `lead_at_report()`: the persistence gate as pure functions | INC-01 to INC-04 |

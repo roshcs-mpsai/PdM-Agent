@@ -1,17 +1,29 @@
-"""Ingest stub -- validate telemetry, quarantine rejects, publish windows (R0.3).
+"""Ingest -- validate, flag, window and store telemetry (T3; ING-06 to ING-13).
 
-Subscribes to the profile's telemetry topic and validates every message with
-a pydantic model built from the profile (ING-06, stub): schema id, asset id,
-sequence number, timestamp, and every profile signal present, numeric and
-finite. Rejects are appended to quarantine.jsonl with an error code and the
-raw payload; nothing is dropped silently. Accepted samples feed one-minute
-means of the detector's raw inputs, published as window_v1 on the profile's
-windows topic. The counts reconcile: in = accepted + quarantined (ING-08);
-gaps in seq are counted as lost.
+Subscribes to the profile's telemetry topic. Every message ends accepted or
+quarantined, never dropped (ING-06, ING-08):
 
-Version Zero: R1a.6 replaces the one-minute means with 10-minute windows on
-the masked, bridged 10 s grid, flags out-of-range values (ING-07) and writes
-to TimescaleDB. Payloads are documented in services/ingest/README.md.
+* Validation: a pydantic model built from the profile (schema id, asset id,
+  seq, timestamp, every profile signal present, numeric and finite, nothing
+  else), then time order. Rejects go to quarantine with an error code -- the
+  store's quarantine table and, if given, a JSONL file.
+* Out of range (ING-07): a value outside its signal's profile range (digital
+  signals: anything but 0 or 1) is kept and flagged on the telemetry row, and
+  left off the grid, so it never reaches a score. An isolated bad reading is
+  bridged like a missing sample; a persistent one leaves windows incomplete.
+* Windows (ING-09 to ING-12): pdm_common.stream.StreamWindows runs the batch
+  pipeline -- freeze mask, 10 s grid with bridging, 10-minute windows at a
+  1-minute stride, the features of features.yaml -- on a rolling buffer and
+  releases each window once later data cannot change it (about 30 s after it
+  ends). Complete windows are published as window_v1 and stored; incomplete
+  ones are counted as dropped. tools/stream_check.py replays the whole 2020
+  file this way and gets the evaluated window table back.
+* Reconciliation (ING-08): in = accepted + quarantined, candidate windows =
+  complete + dropped, and a jump in seq counts as lost. At shutdown the report
+  is printed and appended to runs/<asset>/reconciliation.jsonl, and the
+  windows get a data-catalogue entry (ING-13).
+
+Payloads are documented in services/ingest/README.md.
 """
 from __future__ import annotations
 
@@ -20,17 +32,20 @@ import datetime as dt
 import json
 import logging
 import sys
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
-from pdm_common.hashing import canonical_json
+from pdm_common import catalogue
+from pdm_common.features import FeatureSpec, features_file, load_feature_spec
+from pdm_common.frozen import features_sha256
+from pdm_common.hashing import canonical_json, sha256_file
 from pdm_common.mqtt import Out, run_service
-from pdm_common.profile import ProfileError, load_profile, profile_hash, signal_names
+from pdm_common.profile import ProfileError, events_file, load_profile, profile_hash, signal_names
+from pdm_common.stream import StreamWindow, StreamWindows
 from pdm_common.timeutil import iso_utc, to_utc
-from pdm_common.windows import MinuteWindower, Window
 
 log = logging.getLogger("ingest")
 
@@ -81,6 +96,30 @@ def telemetry_model(profile: dict) -> type[BaseModel]:
     )
 
 
+def signal_ranges(profile: dict) -> dict[str, tuple[float, float] | None]:
+    """The plausible range of each signal: the profile's ``range`` for analog
+    signals; digital signals are 0 or 1 (None marks them)."""
+    ranges = {s["name"]: tuple(float(v) for v in s["range"]) if s.get("range") else None
+              for s in profile["signals"]["analog"]}
+    ranges.update({s["name"]: None for s in profile["signals"]["digital"]})
+    return ranges
+
+
+def out_of_range(values: dict, ranges: dict) -> dict[str, float]:
+    """{signal: value} for every value outside its range (ING-07)."""
+    flags = {}
+    for name, value in values.items():
+        bounds = ranges.get(name, "unknown")
+        if bounds == "unknown":
+            continue
+        if bounds is None:
+            if value not in (0.0, 1.0):
+                flags[name] = value
+        elif not bounds[0] <= value <= bounds[1]:
+            flags[name] = value
+    return flags
+
+
 def _error_code(errors: list[dict]) -> str:
     codes = set()
     for e in errors:
@@ -108,22 +147,44 @@ def _error_code(errors: list[dict]) -> str:
 
 
 class Ingest:
-    """The service minus MQTT: ``handle`` takes a raw payload, returns messages."""
+    """The service minus MQTT: ``handle`` takes a raw payload, returns messages.
+
+    ``store``: a pdm_common.store.Store for telemetry, windows and quarantine
+    rows (None: nothing stored). ``spec``: the feature declarations (default:
+    the profile's features file next to ``profile_path``).
+    """
 
     def __init__(self, profile: dict, profile_sha256: str,
-                 quarantine_path: Optional[Path] = None):
+                 quarantine_path: Optional[Path] = None, *, spec: Optional[FeatureSpec] = None,
+                 profile_path: Optional[Path] = None, store=None, telemetry_batch: int = 360):
+        self.profile = profile
         self.asset = profile["asset"]["id"]
         self.windows_topic = profile["topics"]["windows"]
         self.source_tz = profile.get("source_timezone", "UTC")
         self.profile_sha256 = profile_sha256
         self.model = telemetry_model(profile)
-        self.inputs = list(profile["detector"]["inputs"])
-        self.windower = MinuteWindower(self.inputs)
+        self.ranges = signal_ranges(profile)
+        if spec is None:
+            if profile_path is None:
+                raise ValueError("Ingest needs the feature spec or the profile's path")
+            spec = load_feature_spec(features_file(profile, profile_path))
+        self.spec = spec
+        self.features_sha256 = features_sha256(spec.raw)
+        self.stream = StreamWindows(profile, spec)
         self.quarantine_path = Path(quarantine_path) if quarantine_path else None
-        self.counts = Counter({"in": 0, "accepted": 0, "quarantined": 0, "lost": 0, "windows": 0})
+        self.store = store
+        self.telemetry_batch = telemetry_batch
+        self._telemetry_rows: list[dict] = []
+        self._flagged: deque = deque()          # (ts, {signal: value}) of recent out-of-range records
+        self.counts = Counter({"in": 0, "accepted": 0, "quarantined": 0, "lost": 0, "out_of_range": 0,
+                               "windows": 0, "complete": 0, "dropped": 0})
         self.by_code: Counter = Counter()
+        self.flagged_by_signal: Counter = Counter()
+        self.first_ts: Optional[dt.datetime] = None
+        self.last_ts: Optional[dt.datetime] = None
         self._last_ts: Optional[dt.datetime] = None
         self._last_seq: Optional[int] = None
+        self.replays = 1
 
     # -- validation -------------------------------------------------------
     def _parse(self, payload: bytes | str):
@@ -139,7 +200,7 @@ class Ingest:
         except (ValueError, TypeError, OverflowError) as exc:
             raise Rejected("bad_timestamp", f"ts: {exc}") from None
         values = msg.signals.model_dump(by_alias=True)
-        return ts, values
+        return msg.seq, ts, values
 
     def _check_order(self, ts: dt.datetime) -> None:
         if self._last_ts is not None and ts <= self._last_ts:
@@ -150,15 +211,18 @@ class Ingest:
     def _track_seq(self, payload: bytes | str) -> list[Out]:
         """Sequence bookkeeping for every message whose seq is readable, accepted
         or not: a jump counts as lost, and seq 0 starts a new replay, which
-        closes the previous replay's open window."""
+        releases what the previous replay left open and starts a new stream."""
         seq = _peek_seq(payload)
         if seq is None:
             return []
         outs = []
         if seq == 0 and self._last_seq is not None:
-            log.info("seq 0 after seq %d: a new replay; closing the open window", self._last_seq)
+            log.info("seq 0 after seq %d: a new replay; closing the previous stream", self._last_seq)
             outs = self.flush()
+            self.stream = StreamWindows(self.profile, self.spec)
+            self._flagged.clear()
             self._last_ts = self._last_seq = None
+            self.replays += 1
         if self._last_seq is not None and seq > self._last_seq + 1:
             self.counts["lost"] += seq - self._last_seq - 1
         if self._last_seq is None or seq > self._last_seq:
@@ -169,16 +233,15 @@ class Ingest:
         self.counts["quarantined"] += 1
         self.by_code[err.code] += 1
         raw = payload.decode("utf-8", "replace") if isinstance(payload, bytes) else payload
-        record = {
-            "received_at": iso_utc(dt.datetime.now(dt.timezone.utc)),   # wall clock: logs only
-            "asset": self.asset,
-            "error_code": err.code,
-            "error": str(err),
-            "payload": raw,
-        }
+        received = iso_utc(dt.datetime.now(dt.timezone.utc))      # wall clock: logs only
+        record = {"received_at": received, "asset": self.asset, "error_code": err.code,
+                  "error": str(err), "payload": raw}
         if self.quarantine_path is not None:
             with open(self.quarantine_path, "a") as f:
                 f.write(json.dumps(record, sort_keys=True) + "\n")
+        if self.store is not None:
+            self.store.insert("quarantine", {"asset_id": self.asset, "received_at": received,
+                                             "error_code": err.code, "error_text": str(err), "payload": raw})
         log.warning("quarantined %s: %s", err.code, err)
 
     # -- the handler ------------------------------------------------------
@@ -187,7 +250,7 @@ class Ingest:
         self.counts["in"] += 1
         outs = self._track_seq(payload)
         try:
-            ts, values = self._parse(payload)
+            seq, ts, values = self._parse(payload)
             self._check_order(ts)
         except Rejected as err:
             self._quarantine(payload, err)
@@ -197,38 +260,112 @@ class Ingest:
             self._quarantine(payload, Rejected("internal_error", f"{type(exc).__name__}: {exc}"))
             return outs
         self._last_ts = ts
+        self.first_ts = self.first_ts or ts
+        self.last_ts = ts
         self.counts["accepted"] += 1
-        return outs + [self._window_message(w) for w in self.windower.add(ts, values)]
+        flags = out_of_range(values, self.ranges)
+        if flags:
+            self.counts["out_of_range"] += 1
+            self.flagged_by_signal.update(flags.keys())
+            self._flagged.append((ts, flags))
+            log.warning("out of range at %s: %s", iso_utc(ts), flags)
+        self._telemetry_rows.append({"asset_id": self.asset, "ts": ts, "seq": seq, "signals": values,
+                                     "out_of_range": flags or None})
+        windows = self.stream.add(ts, values, excluded=flags.keys())
+        if windows or len(self._telemetry_rows) >= self.telemetry_batch:
+            self._write_telemetry()
+        return outs + self._publish(windows)
 
     def flush(self) -> list[Out]:
-        """Close the open window (shutdown)."""
-        return [self._window_message(w) for w in self.windower.flush()]
+        """End of stream or shutdown: release every window the data allows."""
+        outs = self._publish(self.stream.flush())
+        self._write_telemetry()
+        return outs
 
-    def _window_message(self, w: Window) -> Out:
-        self.counts["windows"] += 1
-        payload = canonical_json({
+    # -- output -----------------------------------------------------------
+    def _write_telemetry(self) -> None:
+        if self.store is not None and self._telemetry_rows:
+            self.store.insert_many("telemetry", self._telemetry_rows)
+        self._telemetry_rows = []
+
+    def _window_flags(self, w: StreamWindow) -> dict[str, int]:
+        """Out-of-range readings per signal inside the window."""
+        start, end = w.start.to_pydatetime(), w.end.to_pydatetime()
+        while self._flagged and self._flagged[0][0] < start - dt.timedelta(minutes=10):
+            self._flagged.popleft()
+        counts: Counter = Counter()
+        for ts, flags in self._flagged:
+            if start <= ts < end:
+                counts.update(flags.keys())
+        return dict(sorted(counts.items()))
+
+    def window_payload(self, w: StreamWindow) -> dict:
+        return {
             "schema": WINDOW_SCHEMA,
             "asset": self.asset,
             "profile_sha256": self.profile_sha256,
-            "start": iso_utc(w.start),
-            "end": iso_utc(w.end),
-            "n": w.n,
-            "features": w.means,
-        })
-        c = self.counts
-        log.info("window %s n=%d | in=%d accepted=%d quarantined=%d lost=%d",
-                 iso_utc(w.end), w.n, c["in"], c["accepted"], c["quarantined"], c["lost"])
-        return Out(self.windows_topic, payload)
+            "features_sha256": self.features_sha256,
+            "start": iso_utc(w.start.to_pydatetime()),
+            "end": iso_utc(w.end.to_pydatetime()),
+            "n_observed": w.n_observed,
+            "n_bridged": w.n_bridged,
+            "out_of_range": self._window_flags(w),
+            "features": w.json_features(),
+        }
+
+    def _publish(self, windows: list[StreamWindow]) -> list[Out]:
+        outs = []
+        rows = []
+        for w in windows:
+            self.counts["windows"] += 1
+            if not w.complete:
+                self.counts["dropped"] += 1
+                continue
+            self.counts["complete"] += 1
+            payload = self.window_payload(w)
+            outs.append(Out(self.windows_topic, canonical_json(payload)))
+            rows.append({"asset_id": self.asset, "window_start": payload["start"], "window_end": payload["end"],
+                         "features": payload["features"], "n_bridged": w.n_bridged,
+                         "profile_sha256": self.profile_sha256})
+        if rows and self.store is not None:
+            self.store.insert_many("windows", rows)
+        if outs:
+            c = self.counts
+            log.info("windows to %s | in=%d accepted=%d quarantined=%d lost=%d complete=%d dropped=%d",
+                     json.loads(outs[-1].payload)["end"], c["in"], c["accepted"], c["quarantined"], c["lost"],
+                     c["complete"], c["dropped"])
+        return outs
 
     def reconciliation(self) -> dict:
         c = self.counts
         return {
             "asset": self.asset,
-            "in": c["in"], "accepted": c["accepted"], "quarantined": c["quarantined"],
-            "lost": c["lost"], "windows": c["windows"],
+            "in": c["in"], "accepted": c["accepted"], "quarantined": c["quarantined"], "lost": c["lost"],
             "quarantined_by_code": dict(sorted(self.by_code.items())),
-            "balanced": c["in"] == c["accepted"] + c["quarantined"],
+            "out_of_range_records": c["out_of_range"],
+            "out_of_range_by_signal": dict(sorted(self.flagged_by_signal.items())),
+            "windows": c["windows"], "windows_complete": c["complete"], "windows_dropped": c["dropped"],
+            "replays": self.replays,
+            "first_ts": iso_utc(self.first_ts) if self.first_ts else None,
+            "last_ts": iso_utc(self.last_ts) if self.last_ts else None,
+            "balanced": c["in"] == c["accepted"] + c["quarantined"] and c["windows"] == c["complete"] + c["dropped"],
         }
+
+    def catalogue_entry(self, *, replay_manifest: Optional[Path] = None, profile_path: Optional[Path] = None,
+                        path=None) -> dict:
+        """Record the windows this run produced in the data catalogue (ING-13)."""
+        manifest = json.loads(Path(replay_manifest).read_text()) if replay_manifest else {}
+        events = events_file(self.profile, profile_path) if profile_path else None
+        lineage = {"telemetry": manifest.get("data_file"), "data_sha256": manifest.get("data_sha256"),
+                   "replay_log_sha256": manifest.get("log_sha256"), "profile_sha256": self.profile_sha256,
+                   "events_sha256": sha256_file(events) if events and events.exists() else None,
+                   "features_sha256": self.features_sha256, "code": "services/ingest/ingest.py"}
+        r = self.reconciliation()
+        name = f"store:windows/{self.asset}/{r['first_ts']}..{r['last_ts']}"
+        return catalogue.add(name, "stream_windows", rows=r["windows_complete"],
+                             columns=len(self.spec.names) + 7,
+                             manifest_sha256=sha256_file(replay_manifest) if replay_manifest else None,
+                             lineage=lineage, path=path)
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -236,8 +373,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--profile", required=True, help="asset profile YAML")
     p.add_argument("--broker", default="localhost")
     p.add_argument("--port", type=int, default=1883)
+    p.add_argument("--store", default=None, help="store URL (default $PDM_STORE or sqlite:///runs/pdm.db)")
+    p.add_argument("--no-store", action="store_true", help="publish windows only; store nothing")
     p.add_argument("--quarantine", default=None,
                    help="quarantine file (default runs/<asset_id>/quarantine.jsonl)")
+    p.add_argument("--replay-manifest", default=None,
+                   help="the replayer's manifest, for the catalogue entry's lineage (ING-05, ING-13)")
     return p.parse_args(argv)
 
 
@@ -251,15 +392,24 @@ def main(argv=None) -> None:
     asset = profile["asset"]["id"]
     quarantine = Path(args.quarantine or f"runs/{asset}/quarantine.jsonl")
     quarantine.parent.mkdir(parents=True, exist_ok=True)
-    ingest = Ingest(profile, profile_hash(args.profile), quarantine)
-    log.info("asset %s: %s -> %s, quarantine %s", asset, profile["topics"]["telemetry"],
-             profile["topics"]["windows"], quarantine)
+    store = None
+    if not args.no_store:
+        from pdm_common.store import open_store
+        store = open_store(args.store)
+    ingest = Ingest(profile, profile_hash(args.profile), quarantine, profile_path=Path(args.profile), store=store)
+    log.info("asset %s: %s -> %s, quarantine %s, store %s", asset, profile["topics"]["telemetry"],
+             profile["topics"]["windows"], quarantine, store.url if store else "none")
     run_service("ingest", {profile["topics"]["telemetry"]: ingest.handle},
                 host=args.broker, port=args.port, on_stop=ingest.flush)
     report = ingest.reconciliation()
     print(json.dumps(report, sort_keys=True), file=sys.stdout)
+    with open(quarantine.parent / "reconciliation.jsonl", "a") as f:
+        f.write(json.dumps(report, sort_keys=True) + "\n")
+    if report["windows_complete"]:
+        entry = ingest.catalogue_entry(replay_manifest=args.replay_manifest, profile_path=Path(args.profile))
+        log.info("catalogue: %s (%d windows)", entry["dataset"], entry["rows"])
     if not report["balanced"]:
-        raise SystemExit("reconciliation failed: in != accepted + quarantined")
+        raise SystemExit("reconciliation failed: in != accepted + quarantined or windows != complete + dropped")
 
 
 if __name__ == "__main__":
