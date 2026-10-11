@@ -30,6 +30,11 @@ OWNERS = {
 TASK = re.compile(r"\bT\d+[ab]?\b")
 
 
+def task_order(task: str) -> tuple:
+    """T2 before T12a before T12b before T15a: by number, then the letter."""
+    return int(re.sub(r"\D", "", task)), task[-1] if task[-1].isalpha() else ""
+
+
 def git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
 
@@ -49,7 +54,7 @@ def commits(since: str) -> list[dict]:
                     f"{since}..HEAD").splitlines():
         h, author, date, subject = line.split("\x1f")
         out.append({"hash": h, "author": author, "date": date, "subject": subject,
-                    "tasks": sorted(set(TASK.findall(subject)), key=lambda t: (len(t), t))})
+                    "tasks": sorted(set(TASK.findall(subject)), key=task_order)})
     return out
 
 
