@@ -14,7 +14,9 @@ so a run that takes minutes never blocks the MQTT connection. Every 30 s it also
 asset's incidents still open in the store: ones whose message it missed while it was down, and
 ones handed back because the model could not be reached, once their wait is over (3 tries over
 15 min by default; after the last, a brief written without the model, so the planner always
-sees the alarm). On start it resumes runs that stopped mid-way (their checkpoints).
+sees the alarm). On start it resumes runs that stopped mid-way (their checkpoints), and every
+tick it looks for incidents a run claimed more than ``outage.stale_after_s`` ago and left in
+diagnosing: it resumes the run from its checkpoint, or hands the incident back when there is none.
 
 The model is claude-opus-5-5 through the Messages API ($ANTHROPIC_API_KEY); ``--scripted``
 replays fixed answers instead (a JSON list of steps, each a list of content blocks), for dry
@@ -42,7 +44,7 @@ import llm  # noqa: E402
 import runner as runner_mod  # noqa: E402
 import sinks  # noqa: E402
 import toolsets  # noqa: E402
-from pdm_common import logs, metrics, tracing  # noqa: E402
+from pdm_common import logs, tracing  # noqa: E402
 from pdm_common.mqtt import Out, run_service  # noqa: E402
 from pdm_common.profile import load_profile, profile_hash, read_yaml  # noqa: E402
 from pdm_common.skills import load_skills  # noqa: E402
@@ -71,9 +73,11 @@ class AgentService:
         self.topic = profile["topics"]["incidents"]
         self.sink = sink
         self.make_runner = make_runner
-        self.retry_after_min = [float(m) for m in (config.get("outage") or {}).get("retry_after_min", [5, 10])]
+        outage = config.get("outage") or {}
+        self.retry_after_min = [float(m) for m in outage.get("retry_after_min", [5, 10])]
+        self.stale_after_s = float(outage.get("stale_after_s", 600))
         self.now = now
-        self.queue: "queue.Queue[str]" = queue.Queue()
+        self.queue: "queue.Queue[tuple]" = queue.Queue()        # ("run", incident id) or ("resume", state)
         self._queued: set = set()
         self._lock = threading.Lock()
         self.counts: Counter = Counter()
@@ -93,16 +97,39 @@ class AgentService:
     def tick(self) -> list[Out]:
         for incident_id in self.due():
             self.enqueue(incident_id)
+        self.recover_stale()
         return []
 
-    def enqueue(self, incident_id: str) -> bool:
+    def enqueue(self, incident_id: str, resume: Optional[dict] = None) -> bool:
         with self._lock:
             if incident_id in self._queued:
                 return False
             self._queued.add(incident_id)
-        self.queue.put(incident_id)
+        self.queue.put(("resume", resume) if resume is not None else ("run", incident_id))
         self.counts["queued"] += 1
         return True
+
+    def recover_stale(self, now: Optional[dt.datetime] = None) -> list[str]:
+        """Incidents a run claimed long ago and left in diagnosing (the agent stopped, or its writes
+        failed): resume the run from its checkpoint, or, when there is none to resume, hand the
+        incident back so the next try claims it. Never one this service is working on."""
+        out = []
+        for stale in self.sink.stale_runs(self.asset, self.stale_after_s):
+            iid = stale["incident_id"]
+            with self._lock:
+                busy = iid in self._queued
+            if busy:
+                continue
+            if stale.get("state"):
+                self.enqueue(iid, resume=stale["state"])
+                log.warning("run %s on %s stopped mid-way; resuming it", stale["trace_id"], iid,
+                            extra={"incident_id": iid, "trace_id": stale["trace_id"]})
+            elif self.sink.release(iid, stale["trace_id"], "the run stopped without moving the incident; it is "
+                                                           "open for the next try"):
+                log.warning("run %s on %s stopped without moving the incident; handed back", stale["trace_id"], iid,
+                            extra={"incident_id": iid, "trace_id": stale["trace_id"]})
+            out.append(iid)
+        return out
 
     def due(self, now: Optional[dt.datetime] = None) -> list[str]:
         """Open incidents to diagnose now: never tried, or handed back and past their wait."""
@@ -143,11 +170,16 @@ class AgentService:
         """The worker thread: one queued incident at a time until ``stop``."""
         while not stop.is_set():
             try:
-                incident_id = self.queue.get(timeout=1.0)
+                kind, item = self.queue.get(timeout=1.0)
             except queue.Empty:
                 continue
+            incident_id = item["incident_id"] if kind == "resume" else item
             try:
-                self.process(incident_id)
+                if kind == "resume":
+                    state = self.make_runner().resume(item)
+                    self.counts[state["outcome"] or "error"] += 1
+                else:
+                    self.process(incident_id)
             except Exception:                     # one incident must not stop the worker
                 log.exception("diagnosing %s failed", incident_id, extra={"incident_id": incident_id})
             finally:
@@ -213,6 +245,9 @@ def main(argv=None) -> int:
     cfg = load_config(args.config)
     arm = args.arm or cfg.get("arm", "full")
     profile = load_profile(args.profile)
+    if args.study and arm != "retrieval_only":
+        raise SystemExit("agent: --study writes the retrieval-only arm's brief for the study; add --arm retrieval_only "
+                         "(a full-arm study brief would become the incident's current brief)")
     token = os.environ.get("PDM_TOKEN_AGENT")
     try:
         if args.policy == "rules":

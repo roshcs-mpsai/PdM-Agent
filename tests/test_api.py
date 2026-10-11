@@ -28,7 +28,7 @@ from pdm_common import incidents as lifecycle  # noqa: E402
 from pdm_common.corpus import Corpus  # noqa: E402
 from pdm_common.skills import load_skills  # noqa: E402
 from pdm_common.store import Store  # noqa: E402
-from test_agent import brief_from, submit  # noqa: E402
+from test_agent import submit  # noqa: E402
 from test_pipeline import synthetic  # noqa: E402
 
 PROFILE_PATH = ROOT / "profiles" / "metropt3_apu" / "asset_profile.yaml"
@@ -275,3 +275,30 @@ def test_the_agent_writes_through_the_api(world):
     assert client.post(f"/incidents/{iid2}/briefs", headers=h("rosh"), json={}).status_code == 403
     assert client.post(f"/incidents/{iid2}/claim", headers=h("agent"), json={"trace_id": "T-late"}).json() == \
         {"claimed": False}
+
+
+def test_the_agent_finds_a_stale_run_through_the_api_and_hands_it_back(world):
+    store, pipe, _, client = world
+    asset = pipe.profile["asset"]["id"]
+    _minute[0] += 1
+    at = dt.datetime(2020, 6, 1, tzinfo=dt.timezone.utc) + dt.timedelta(minutes=_minute[0])
+    iid = f"INC-{asset}-{at:%Y%m%dT%H%MZ}"
+    lifecycle.open_incident(store, {"incident_id": iid, "asset_id": asset, "opened_at": at, "as_of": at,
+                                    "detector_run_id": pipe.frozen.detector_run_id}, cause="gate passed (test)", at=at)
+    assert client.post(f"/incidents/{iid}/claim", headers=h("agent"), json={}).status_code == 422   # no run named
+    assert client.post(f"/incidents/{iid}/claim", headers=h("agent"), json={"trace_id": "T-stale"}).json() == \
+        {"claimed": True}
+
+    def stale(**params):
+        return client.get("/agent/runs/stale", headers=h("agent"), params=params)
+    mine = [r for r in stale(asset_id=asset, older_than_s=0).json()["runs"] if r["incident_id"] == iid]
+    assert len(mine) == 1 and mine[0]["trace_id"] == "T-stale" and mine[0]["state"] is None
+    assert iid not in {r["incident_id"] for r in stale(asset_id=asset, older_than_s=3600).json()["runs"]}
+    assert stale(older_than_s=0).status_code == 422                                  # no asset named
+    assert {stale(asset_id=asset, older_than_s=v).status_code for v in ("soon", "nan", "-5")} == {422}
+    assert client.get("/agent/runs/stale", headers=h("rosh"), params={"asset_id": asset}).status_code == 403
+    assert client.post(f"/incidents/{iid}/release", headers=h("agent"),
+                       json={"trace_id": "T-other", "cause": "not mine"}).json() == {"released": False}
+    assert client.post(f"/incidents/{iid}/release", headers=h("agent"),
+                       json={"trace_id": "T-stale", "cause": "the run stopped (test)"}).json() == {"released": True}
+    assert store.select("incidents", {"incident_id": iid})[0]["state"] == "open"

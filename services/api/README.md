@@ -41,7 +41,7 @@ logged or echoed.
 | GET /traces/{id} | engineer, operator, evaluator | the agent's full trace (AGT-11) |
 | POST /incidents/{id}/claim, /release, /briefs | agent | the agent's claim, hand-back and briefs |
 | POST /agent/runs/{trace}/checkpoint, /trace | agent | the run's checkpoint and trace |
-| GET /agent/runs/unfinished, /agent/incidents/{id}/outages | agent | runs to resume, outage tries |
+| GET /agent/runs/unfinished, /agent/runs/stale, /agent/incidents/{id}/outages | agent | runs to resume, runs left stale, outage tries |
 
 "People" is reviewer, engineer, operator and evaluator. The study endpoints (T34,
 `study.py`, `PDM_STUDY_SALT` required) are added by `main()`:

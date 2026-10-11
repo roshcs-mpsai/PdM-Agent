@@ -47,6 +47,10 @@ class ModelError(RuntimeError):
     """The API refused the request itself (a 4xx other than 408 and 429)."""
 
 
+class DeadlineReached(RuntimeError):
+    """The run's wall-time budget ran out while the model was answering."""
+
+
 @dataclass
 class Turn:
     """One model answer. ``content`` is kept exactly as received."""
@@ -204,16 +208,32 @@ class AnthropicModel:
             body["output_config"] = {"effort": self.effort}
         return body
 
-    def create(self, system: str, tools: list, messages: list) -> Turn:
+    def create(self, system: str, tools: list, messages: list, time_left: Optional[float] = None) -> Turn:
+        """One model turn. ``time_left``: seconds the run has left; no attempt outlasts them, and a
+        timeout cut short by them is DeadlineReached (a budget), not an outage."""
         body = self.request(system, tools, messages)
         headers = {"x-api-key": self._key, "anthropic-version": API_VERSION, "content-type": "application/json"}
-        last = "no attempt made"
+        deadline = None if time_left is None else time.monotonic() + max(0.0, time_left)
+        last, made = "no attempt made", 0
         for attempt in range(self.retries + 1):
             started = time.monotonic()
+            timeout = self.timeout_s
+            if deadline is not None:
+                remaining = deadline - started
+                if remaining <= 0:
+                    if attempt:                      # the time went on failed attempts: an outage
+                        break
+                    raise DeadlineReached("no wall time left for a model call")
+                timeout = min(timeout, remaining)
+            made += 1
             try:
-                r = self.client.post(f"{self.base_url}/v1/messages", json=body, headers=headers,
-                                     timeout=self.timeout_s)
-            except httpx.HTTPError as exc:            # no connection, timeout, broken answer
+                r = self.client.post(f"{self.base_url}/v1/messages", json=body, headers=headers, timeout=timeout)
+            except httpx.TimeoutException as exc:
+                if deadline is not None and timeout < self.timeout_s and time.monotonic() >= deadline - 0.5:
+                    raise DeadlineReached(f"the model had not answered when the run's wall time ran out ({exc})")
+                last = f"{type(exc).__name__}: {exc}"
+                wait = 2.0 * 4 ** attempt
+            except httpx.HTTPError as exc:            # no connection, broken answer
                 last = f"{type(exc).__name__}: {exc}"
                 wait = 2.0 * 4 ** attempt
             else:
@@ -230,8 +250,11 @@ class AnthropicModel:
                 else:
                     raise ModelError(f"HTTP {r.status_code}: {message}")
             if attempt < self.retries:
-                self.sleep(min(wait, 30.0))
-        raise ModelUnavailable(f"{self.name} unreachable after {self.retries + 1} attempts ({last})")
+                pause = min(wait, 30.0)
+                if deadline is not None:
+                    pause = min(pause, max(0.0, deadline - time.monotonic()))
+                self.sleep(pause)
+        raise ModelUnavailable(f"{self.name} unreachable after {made} attempt{'s' if made != 1 else ''} ({last})")
 
 
 def _error_text(r: httpx.Response) -> str:
@@ -287,7 +310,7 @@ class ScriptedModel:
     calls: list = field(default_factory=list)
     _i: int = 0
 
-    def create(self, system: str, tools: list, messages: list) -> Turn:
+    def create(self, system: str, tools: list, messages: list, time_left: Optional[float] = None) -> Turn:
         i = self._i
         self._i += 1
         self.calls.append({"system": system, "tools": [t["name"] for t in tools],

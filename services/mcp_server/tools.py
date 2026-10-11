@@ -32,8 +32,7 @@ import json
 import logging
 import math
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -289,7 +288,13 @@ class ToolServer:
             run.refused.append({"tool": tool, "arguments": arguments, "reason": reason})
             log.warning("refused %s: %s", tool, reason, extra={"incident_id": run.incident["incident_id"]})
             raise ToolRefused(f"{tool}: {reason}") from None
-        output = getattr(self, f"_{tool}")(run, args)
+        try:
+            output = getattr(self, f"_{tool}")(run, args)
+        except ToolRefused as exc:                  # refused on the data: an unknown signal or check
+            run.refused.append({"tool": tool, "arguments": arguments, "reason": str(exc)})
+            log.warning("refused %s: %s", tool, exc, extra={"incident_id": run.incident["incident_id"],
+                                                            "trace_id": run.trace_id})
+            raise
         return self._store(run, tool, args.model_dump(), output)
 
     # -- the tools ---------------------------------------------------------------------------------
@@ -308,7 +313,7 @@ class ToolServer:
             return out
         times = pd.DatetimeIndex(frame["timestamp"]).tz_localize("UTC")
         minutes = ((pd.Timestamp(run.as_of) - times).total_seconds() / 60).to_numpy()
-        gaps = np.diff(times.asi8) / 1e9 if len(times) > 1 else np.array([])
+        gaps = np.diff(times.as_unit("ns").asi8) / 1e9 if len(times) > 1 else np.array([])   # any pandas unit
         out["largest_gap_minutes"] = _num(gaps.max() / 60, 1) if len(gaps) else 0.0
         for name in a.signals:
             x = frame[name].to_numpy(dtype=float)

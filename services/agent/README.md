@@ -34,7 +34,15 @@ Metrics on port 9106.
 
 A checkpoint (`agent_checkpoints`) is written after every step; on start the service
 resumes runs that stopped mid-way. Result ids continue from the store, so a resumed run
-never reuses one.
+never reuses one. A checkpoint that cannot be written is logged and the run carries on.
+
+A run holds its incident from its claim (the event "agent run <trace> started") until the
+incident leaves diagnosing; only the holder may hand it back or have its brief move it. A
+run that loses a claim race stops at once; one given up as stale that still submits a brief
+has it stored as invalid.
+Every tick the service looks for incidents a run claimed more than `outage.stale_after_s`
+(600 s) ago and left in diagnosing: it resumes the run from its checkpoint, or hands the
+incident back when there is none to resume.
 
 ## Rules the runtime enforces
 
@@ -44,6 +52,9 @@ never reuses one.
   but not counted, so the system prompt counts once. A brief submitted after the tool
   budget refused a call is flagged `budget_exhausted` and its summary starts "Partial
   brief"; when turns, time or tokens run out first, the runtime writes that partial brief.
+  The wall time also bounds each model call (a call cut short by it ends the run as
+  `budget_exhausted`, not as an outage). Tokens are known only after a call, so a run can
+  pass 50,000 by the one call that crossed it.
 - **Validation** (BRF-02): every brief goes through `pdm_common.diagnosis.accept_brief`
   (the API runs the same function). The runtime sets schema, brief_id, incident_id,
   asset_id, versions and the draft status; the model's text is never edited otherwise.

@@ -91,7 +91,8 @@ def test_only_the_allowlist_and_valid_arguments(world, run):
         tools.call(run, "attribute_anomaly", {"top": 3, "sql": "DROP TABLE"})
     with pytest.raises(toolmod.ToolRefused, match="unknown signal"):
         tools.call(run, "get_telemetry", {"signals": ["not_a_signal"]})
-    assert [r["tool"] for r in run.refused] == ["reset_compressor_controller", "get_telemetry", "attribute_anomaly"]
+    assert [r["tool"] for r in run.refused] == ["reset_compressor_controller", "get_telemetry", "attribute_anomaly",
+                                                "get_telemetry"]
     assert run.n == 1                                       # nothing refused was stored
 
 
@@ -281,3 +282,26 @@ def test_the_context_is_a_resource_not_a_tool(world):
     assert body["tool"] == "incident_context" and body["result_id"].endswith("-1")
     assert body["tools"] == ["search_knowledge"]
     assert "not a tool of this run" in json.loads(refused.content[0].text)["error"]
+
+
+def test_the_largest_gap_is_in_minutes_whatever_the_time_unit(world):
+    """pandas 3 keeps microsecond timestamps: the gap must not come out 1000 times too small."""
+    store, pipe, tools, _ = world
+    asset = pipe.profile["asset"]["id"]
+    at = "2020-06-01T02:00:00Z"                              # the synthetic data run 00:00-02:30
+    iid = _incident(store, asset, at)
+    store.execute("DELETE FROM telemetry WHERE ts > ? AND ts < ?", ["2020-06-01T01:20:00.000000Z",
+                                                                   "2020-06-01T01:50:00.000000Z"])
+    r = tools.open_run(iid, "T-gap")
+    out = tools.call(r, "get_telemetry", {"signals": [pipe.profile["signals"]["analog"][0]["name"]],
+                                          "hours_before": 1})["output"]
+    assert 29.5 <= out["largest_gap_minutes"] <= 30.5
+
+
+def test_a_refusal_on_the_data_is_logged_and_recorded(world, run, caplog):
+    _, _, tools, _ = world
+    with caplog.at_level("WARNING", logger="mcp_server"):
+        with pytest.raises(toolmod.ToolRefused, match="unknown check"):
+            tools.call(run, "run_check", {"check_ids": ["C99"]})
+    assert run.refused[-1]["tool"] == "run_check" and "unknown check" in run.refused[-1]["reason"]
+    assert any("refused run_check" in r.getMessage() for r in caplog.records)

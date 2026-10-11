@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
+import logging
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -36,6 +37,7 @@ import tools as toolserver  # noqa: E402
 
 ToolRefused = toolserver.ToolRefused
 CONTEXT_TOOL = toolserver.CONTEXT_TOOL
+log = logging.getLogger("agent")
 
 
 class InProcessTools:
@@ -141,6 +143,8 @@ class McpTools:
 
     def call(self, run: RemoteRun, tool: str, arguments: dict) -> dict:
         if tool not in run.tools:
+            log.warning("refused %s: not a tool of the %s arm", tool, run.arm,
+                        extra={"incident_id": run.incident["incident_id"], "trace_id": run.trace_id})
             raise ToolRefused(f"{tool} is not a tool of this run; the tools are {', '.join(run.tools)}")
         args = dict(arguments or {}, incident_id=run.incident["incident_id"], trace_id=run.trace_id, arm=run.arm)
         answer = self._ask(lambda c: c.call_tool(tool, args))

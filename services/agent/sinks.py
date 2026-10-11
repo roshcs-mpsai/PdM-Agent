@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pdm_common.diagnosis import accept_brief, claim, outage_tries, release, save_checkpoint, unfinished
+from pdm_common.diagnosis import (accept_brief, claim, outage_tries, release, save_checkpoint, stale_runs,
+                                  unfinished)
 
 
 class DirectSink:
@@ -43,6 +44,9 @@ class DirectSink:
 
     def outage_tries(self, incident_id: str) -> list[dict]:
         return outage_tries(self.store, incident_id)
+
+    def stale_runs(self, asset_id: str, older_than_s: float) -> list[dict]:
+        return stale_runs(self.store, asset_id, older_than_s)
 
     def open_incidents(self, asset_id: str) -> list[str]:
         return [r["incident_id"] for r in self.store.query(
@@ -101,6 +105,9 @@ class ApiSink:
 
     def outage_tries(self, incident_id: str) -> list[dict]:
         return self._get(f"/agent/incidents/{incident_id}/outages")["runs"]
+
+    def stale_runs(self, asset_id: str, older_than_s: float) -> list[dict]:
+        return self._get("/agent/runs/stale", {"asset_id": asset_id, "older_than_s": older_than_s})["runs"]
 
     def open_incidents(self, asset_id: str) -> list[str]:
         doc = self._get("/incidents", {"state": "open", "asset_id": asset_id})

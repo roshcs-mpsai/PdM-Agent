@@ -23,7 +23,7 @@ environment; the routes are the FRD's). Tokens and roles: services/api/auth.py.
 | POST /incidents/{id}/claim, /release | agent | the agent's claim and hand-back (INC-06) |
 | POST /incidents/{id}/briefs | agent | a brief: validated, stored, the incident moved (BRF-02) |
 | POST /agent/runs/{trace}/checkpoint, /trace | agent | the run's checkpoint and its trace |
-| GET /agent/runs/unfinished, /agent/incidents/{id}/outages | agent | what the agent resumes and retries |
+| GET /agent/runs/unfinished, /agent/runs/stale, /agent/incidents/{id}/outages | agent | what the agent resumes and retries |
 
 "People" is reviewer, engineer, operator and evaluator. ``main()`` adds the blinded study's
 endpoints (study.py, T34). No route creates a work order except a decision (HIL-06).
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import os
 import sys
 import time
@@ -225,8 +226,9 @@ def create_app(store=None, tokens: Optional[dict] = None, *, skill_for=None, ext
     @route("/incidents/{incident_id}/claim", ["POST"], ("agent",))
     async def claim(request, principal):
         doc = await body(request)
-        return _json({"claimed": agent_side.claim(store, request.path_params["incident_id"],
-                                                  str(doc.get("trace_id") or ""))})
+        if not doc.get("trace_id"):
+            raise ApiError(422, "a claim names the run's trace_id")
+        return _json({"claimed": agent_side.claim(store, request.path_params["incident_id"], str(doc["trace_id"]))})
 
     @route("/incidents/{incident_id}/release", ["POST"], ("agent",))
     async def release(request, principal):
@@ -277,13 +279,26 @@ def create_app(store=None, tokens: Optional[dict] = None, *, skill_for=None, ext
     async def unfinished(request, principal):
         return _json({"runs": agent_side.unfinished(store, request.query_params.get("asset_id"))})
 
+    @route("/agent/runs/stale", ["GET"], ("agent",))
+    async def stale(request, principal):
+        q = request.query_params
+        try:
+            older = float(q.get("older_than_s", "600"))
+        except ValueError:
+            older = math.nan
+        if not math.isfinite(older) or older < 0:
+            raise ApiError(422, "older_than_s is a number of seconds, 0 or more")
+        if not q.get("asset_id"):
+            raise ApiError(422, "asset_id is required")
+        return _json({"runs": agent_side.stale_runs(store, q["asset_id"], older)})
+
     @route("/agent/incidents/{incident_id}/outages", ["GET"], ("agent",))
     async def outages(request, principal):
         return _json({"runs": agent_side.outage_tries(store, request.path_params["incident_id"])})
 
     routes = [Route("/health", health), me, assets, asset, asset_series,
               incident_list, incident, result, work_order_list, decide, decision_audit, trace, claim, release,
-              submit_brief, checkpoint, save_trace, unfinished, outages, *extra_routes]
+              submit_brief, checkpoint, save_trace, unfinished, stale, outages, *extra_routes]
 
     async def errors(request: Request, exc: ApiError) -> Response:
         headers = {"WWW-Authenticate": "Bearer"} if exc.status == 401 else None

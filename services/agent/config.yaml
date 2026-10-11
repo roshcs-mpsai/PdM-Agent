@@ -23,3 +23,4 @@ arm: full                      # full, or retrieval_only (search_knowledge alone
 
 outage:                        # FRD section 5: the model is unreachable
   retry_after_min: [5, 10]     # tries at 0, +5 and +15 min; after the third, a brief without the model
+  stale_after_s: 600           # an incident a run claimed this long ago, still diagnosing: resumed or handed back

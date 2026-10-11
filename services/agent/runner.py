@@ -147,7 +147,11 @@ class Runner:
                     state["elapsed_s"] = round(self.clock() - began, 3)
                     state["node"] = nxt
                     if nxt != "end" and state["outcome"] != "claimed_elsewhere":
-                        self.sink.checkpoint(state)
+                        try:
+                            self.sink.checkpoint(state)
+                        except Exception:                  # recovery data: its loss must not stop the run
+                            log.warning("run %s: the checkpoint after %s was not written", state["trace_id"], node,
+                                        exc_info=True)
                 span.set(outcome=state["outcome"], brief_id=state["brief_id"], tool_calls=state["tool_calls"],
                          turns=state["turns"], tokens=state["tokens"]["counted"])
         finally:
@@ -161,10 +165,12 @@ class Runner:
 
     # -- steps ---------------------------------------------------------------------------------------
     def _start(self, state: dict) -> str:
-        if not self.study and not self.sink.claim(state["incident_id"], state["trace_id"]):
-            state["outcome"] = "claimed_elsewhere"
-            log.info("incident %s is not open; another run has it", state["incident_id"])
-            return "end"
+        if not self.study:
+            if not self.sink.claim(state["incident_id"], state["trace_id"]):
+                state["outcome"] = "claimed_elsewhere"
+                log.info("incident %s is not open; another run has it", state["incident_id"])
+                return "end"
+            state["claimed"] = True
         self._run = self.tools.open(state["incident_id"], state["trace_id"], self.arm)
         context = self.tools.context(self._run)
         state["context_id"] = context["result_id"]
@@ -182,7 +188,12 @@ class Runner:
             state["budget_hit"] = hit
             return "exhausted"
         try:
-            turn = self.model.create(self.system, self.tool_defs, state["messages"])
+            turn = self.model.create(self.system, self.tool_defs, state["messages"],
+                                     time_left=self.budget.wall_s - self._elapsed())
+        except llm.DeadlineReached as exc:
+            state["budget_hit"] = "wall time"
+            state["error"] = str(exc)
+            return "exhausted"
         except llm.ModelUnavailable as exc:
             state["error"] = str(exc)
             return "released"
@@ -267,7 +278,7 @@ class Runner:
 
     def _released(self, state: dict) -> str:
         reason = state["error"] or "the language model could not be reached"
-        if not self.study:
+        if state.get("claimed"):                      # only the run holding the incident hands it back
             self.sink.release(state["incident_id"], state["trace_id"],
                               f"{reason}; the incident stays open for the next try")
         if state["outcome"] != "error":

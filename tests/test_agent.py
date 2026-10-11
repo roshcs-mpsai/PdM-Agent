@@ -253,8 +253,8 @@ def test_a_refusal_ends_in_the_fallback(world):
     iid = fresh_incident(world)
 
     class Declines(ScriptedModel):
-        def create(self, system, tools, messages):
-            turn = super().create(system, tools, messages)
+        def create(self, system, tools, messages, **kwargs):
+            turn = super().create(system, tools, messages, **kwargs)
             turn.stop_reason = "refusal"
             return turn
     state = make_runner(world, Declines([[say("No.")]])).run(iid)
@@ -301,7 +301,7 @@ def test_an_unexpected_error_releases_the_incident(world):
     iid = fresh_incident(world)
 
     class Broken(ScriptedModel):
-        def create(self, system, tools, messages):
+        def create(self, system, tools, messages, **kwargs):
             raise ZeroDivisionError("a bug")
     state = make_runner(world, Broken([])).run(iid)
     assert state["outcome"] == "error" and "ZeroDivisionError" in state["error"]
@@ -500,7 +500,7 @@ def test_the_service_queues_opened_incidents_of_its_asset_only(world):
                 {"schema": "incident_v1", "event": "opened", "asset": asset, "incident_id": "INC-a"}):
         service.handle_incident(json.dumps(doc))
     service.handle_incident("not json")
-    assert service.queue.qsize() == 1 and service.queue.get() == "INC-a"
+    assert service.queue.qsize() == 1 and service.queue.get() == ("run", "INC-a")
 
 
 # --- the tools over MCP ----------------------------------------------------------------------------
@@ -555,3 +555,162 @@ def test_the_command_line_dry_run(tmp_path):
     doc = store.select("briefs", {"brief_id": summary["brief_id"]})[0]["document"]
     assert doc["checks_run"] and doc["checks_run"][0].startswith("R-")
     assert store.select("incidents", {"incident_id": iid})[0]["state"] == "awaiting_review"
+
+
+# --- holding an incident: claims, releases, stale runs ------------------------------------------------
+
+def test_only_the_run_holding_an_incident_hands_it_back_or_diagnoses_it(world):
+    from pdm_common import diagnosis
+    store = world[0]
+    iid = fresh_incident(world)
+    with pytest.raises(ValueError):
+        diagnosis.claim(store, iid, "")                                       # a claim no run would hold
+    assert diagnosis.claim(store, iid, "T-winner")
+    assert not diagnosis.claim(store, iid, "T-loser") and diagnosis.holder(store, iid) == "T-winner"
+    assert not diagnosis.release(store, iid, "T-loser", "lost the race")          # the loser cannot reopen it
+    assert store.select("incidents", {"incident_id": iid})[0]["state"] == "diagnosing"
+    loser = make_runner(world, ScriptedModel([])).run(iid, trace_id="T-loser")
+    assert loser["outcome"] == "claimed_elsewhere" and not loser.get("claimed")
+    assert diagnosis.release(store, iid, "T-winner", "test")
+    assert store.select("incidents", {"incident_id": iid})[0]["state"] == "open"
+
+
+def test_a_brief_from_a_run_that_lost_the_incident_is_refused(world):
+    from pdm_common import diagnosis
+    store = world[0]
+    iid = fresh_incident(world)
+    model = ScriptedModel([[call("run_check")], lambda m: (diagnosis.release(store, iid, "T-slow", "given up as stale"),
+                                                           diagnosis.claim(store, iid, "T-new"))
+                           and submit()(m)])
+    state = make_runner(world, model).run(iid, trace_id="T-slow")
+    rows = store.select("briefs", {"incident_id": iid})
+    assert rows and not any(r["valid"] for r in rows if r["trace_id"] == "T-slow")
+    assert any("held by another agent run" in str(r["validation"]) for r in rows)
+    assert state["outcome"] == "error" and diagnosis.holder(store, iid) == "T-new"   # the new holder keeps it
+
+
+def test_a_busy_sqlite_claim_is_retried():
+    from pdm_common import diagnosis
+
+    class OperationalError(Exception):
+        pass
+
+    class Busy:
+        dialect = "sqlite"
+        calls = 0
+
+        def transaction(self):
+            Busy.calls += 1
+            raise OperationalError("database is locked")
+    with pytest.raises(OperationalError):
+        diagnosis.claim(Busy(), "INC-x", "T-x", tries=3)
+    assert Busy.calls == 3
+
+
+def test_a_lost_checkpoint_does_not_stop_the_run(world):
+    store = world[0]
+    iid = fresh_incident(world)
+
+    class NoCheckpoints(sinks.DirectSink):
+        def checkpoint(self, state):
+            raise ConnectionError("the API is restarting")
+    r = make_runner(world, ScriptedModel(diligent(world)))
+    r.sink = NoCheckpoints(store)
+    state = r.run(iid)
+    assert state["outcome"] == "insufficient"
+    assert store.select("incidents", {"incident_id": iid})[0]["state"] == "awaiting_review"
+
+
+def test_stale_runs_are_resumed_or_handed_back(world):
+    from pdm_common import diagnosis
+    store, pipe, _ = world
+    asset = pipe.profile["asset"]["id"]
+    with_cp, without = fresh_incident(world), fresh_incident(world)
+
+    class Crash(BaseException):
+        pass
+
+    def crash(messages):
+        raise Crash()
+    with pytest.raises(Crash):                                      # leaves a checkpoint at the model step
+        make_runner(world, ScriptedModel([[call("run_check")], crash])).run(with_cp, trace_id="T-stale-cp")
+    assert diagnosis.claim(store, without, "T-stale-none")           # claimed, then nothing: no checkpoint
+    later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30)
+    found = {s["incident_id"]: s for s in diagnosis.stale_runs(store, asset, 600, now=later)}
+    assert set(found) >= {with_cp, without} and found[with_cp]["state"]["node"] == "model"
+    assert not diagnosis.stale_runs(store, asset, 600)               # not stale yet, right after the claim
+    service = agent_service.AgentService(profile=pipe.profile, sink=sinks.DirectSink(store), config={},
+                                         make_runner=lambda: make_runner(world, ScriptedModel(diligent(world)[1:])))
+    service.sink.stale_runs = lambda a, s: [found[with_cp], found[without]]
+    assert set(service.recover_stale()) == {with_cp, without}
+    assert store.select("incidents", {"incident_id": without})[0]["state"] == "open"     # handed back
+    assert service.queue.qsize() == 1                                                   # the other resumes
+    stop = __import__("threading").Event()
+    worker = __import__("threading").Thread(target=service.work, args=(stop,))
+    worker.start()
+    for _ in range(200):
+        if store.select("incidents", {"incident_id": with_cp})[0]["state"] == "awaiting_review":
+            break
+        __import__("time").sleep(0.02)
+    stop.set()
+    worker.join(5)
+    assert store.select("incidents", {"incident_id": with_cp})[0]["state"] == "awaiting_review"
+
+
+def test_a_finished_run_that_left_its_incident_diagnosing_is_handed_back(world):
+    """The brief and the hand-back both failed to be written, the trace did not: no run to resume."""
+    from pdm_common import diagnosis
+    store, pipe, _ = world
+    asset = pipe.profile["asset"]["id"]
+    iid = fresh_incident(world)
+    assert diagnosis.claim(store, iid, "T-ended")
+    diagnosis.save_checkpoint(store, {"incident_id": iid, "trace_id": "T-ended", "arm": "full", "node": "done"})
+    now = dt.datetime.now(dt.timezone.utc)
+    store.insert("agent_traces", {"trace_id": "T-ended", "incident_id": iid, "arm": "full", "model": "scripted",
+                                  "skills": [], "messages": [], "tool_calls": [], "budget": {}, "outcome": "error",
+                                  "started_at": now, "finished_at": now})
+    found = [s for s in diagnosis.stale_runs(store, asset, 600, now=now + dt.timedelta(minutes=30))
+             if s["incident_id"] == iid]
+    assert found == [dict(found[0], finished=True, state=None)]
+    service = agent_service.AgentService(profile=pipe.profile, sink=sinks.DirectSink(store), config={},
+                                         make_runner=lambda: None)
+    service.sink.stale_runs = lambda a, s: found
+    assert service.recover_stale() == [iid] and service.queue.qsize() == 0
+    assert store.select("incidents", {"incident_id": iid})[0]["state"] == "open"
+
+
+# --- the wall-time budget reaches into a model call ---------------------------------------------------
+
+def test_a_model_call_stops_at_the_runs_wall_time():
+    def slow(request):
+        raise httpx.ReadTimeout("no answer yet", request=request)
+    model = llm.AnthropicModel("m", api_key="k", client=_api(slow), timeout_s=60, retries=2, sleep=lambda s: None)
+    with pytest.raises(llm.DeadlineReached):
+        model.create("s", [], [{"role": "user", "content": "x"}], time_left=0.2)
+    with pytest.raises(llm.DeadlineReached):
+        model.create("s", [], [{"role": "user", "content": "x"}], time_left=0)
+    with pytest.raises(llm.ModelUnavailable):                       # with time to spare, a timeout is an outage
+        model.create("s", [], [{"role": "user", "content": "x"}])
+
+
+def test_failed_attempts_that_use_up_the_wall_time_are_an_outage():
+    import time
+
+    def refused(request):
+        raise httpx.ConnectError("no route to the API", request=request)
+    model = llm.AnthropicModel("m", api_key="k", client=_api(refused), timeout_s=60, retries=2,
+                               sleep=lambda s: time.sleep(s + 0.01))
+    with pytest.raises(llm.ModelUnavailable, match=r"after 1 attempt \("):   # the pause took the rest of the time
+        model.create("s", [], [{"role": "user", "content": "x"}], time_left=0.2)
+
+
+def test_a_run_whose_model_runs_out_of_wall_time_ends_with_a_partial_brief(world):
+    iid = fresh_incident(world)
+
+    class TooSlow(ScriptedModel):
+        def create(self, system, tools, messages, time_left=None):
+            if self._i >= 1:
+                raise llm.DeadlineReached("the model had not answered")
+            return super().create(system, tools, messages, time_left=time_left)
+    state = make_runner(world, TooSlow([[call("run_check")]])).run(iid)
+    assert state["outcome"] == "budget_exhausted" and state["budget_hit"] == "wall time"

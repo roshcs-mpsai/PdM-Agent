@@ -25,9 +25,11 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import re
+import time
 
 from pdm_common import incidents as lifecycle
 from pdm_common.brief import validate_brief
+from pdm_common.timeutil import to_utc
 
 RESULT_ID = re.compile(r"^R-([0-9a-f]{8})-([0-9]+)$")
 ARMS = ("full", "retrieval_only")
@@ -69,6 +71,8 @@ def accept_brief(store, brief: dict, *, trace_id: str, arm: str, at=None, move: 
             return [f"/incident_id: no incident {incident_id}"]
         if move and not problems and row["state"] != "diagnosing":
             problems = [f"/incident_id: {incident_id} is {row['state']}, not diagnosing; the brief was not accepted"]
+        elif move and not problems and holder(store, incident_id) != trace_id:
+            problems = [f"/incident_id: {incident_id} is held by another agent run; the brief was not accepted"]
         if store.select("briefs", {"brief_id": brief_id}, columns="brief_id"):
             return [f"/brief_id: {brief_id} is already stored"]
         store.insert("briefs", {"brief_id": brief_id, "incident_id": incident_id, "document": brief,
@@ -91,20 +95,55 @@ def latest_brief(store, incident_id: str, *, valid_only: bool = True) -> dict | 
 
 
 # --- the agent's run records ---------------------------------------------------------------------
+#
+# A run holds an incident from its claim (the event "agent run <trace> started", open ->
+# diagnosing) until the incident leaves diagnosing. Only the holder may hand it back or move it
+# on, so a run that lost a claim race, or was given up for stale, cannot reopen or diagnose an
+# incident another run now holds.
 
-def claim(store, incident_id: str, trace_id: str) -> bool:
+CLAIM_CAUSE = "agent run {trace_id} started"
+
+
+def _busy(exc: Exception) -> bool:
+    """SQLite's answer when another connection is writing: worth a retry, not a failure."""
+    return type(exc).__name__ == "OperationalError" and "locked" in str(exc).lower()
+
+
+def claim(store, incident_id: str, trace_id: str, tries: int = 6) -> bool:
     """open -> diagnosing for this run; False when the incident is not open (another run has it)."""
-    try:
-        lifecycle.transition(store, incident_id, "diagnosing", "agent", f"agent run {trace_id} started",
-                             expect="open")
-        return True
-    except lifecycle.IllegalTransition:
-        return False
+    if not trace_id:
+        raise ValueError("a claim needs the run's trace id: without it no run holds the incident")
+    for attempt in range(tries):
+        try:
+            lifecycle.transition(store, incident_id, "diagnosing", "agent", CLAIM_CAUSE.format(trace_id=trace_id),
+                                 expect="open")
+            return True
+        except lifecycle.IllegalTransition:
+            return False
+        except Exception as exc:
+            if not _busy(exc) or attempt == tries - 1:
+                raise
+            time.sleep(0.05 * 2 ** attempt)
+    return False
+
+
+def holder(store, incident_id: str) -> str | None:
+    """The trace id of the run holding the incident, or None when no run holds it."""
+    last = store.one("SELECT to_state, cause FROM incident_events WHERE incident_id = ? ORDER BY id DESC LIMIT 1",
+                     [incident_id])
+    if not last or last["to_state"] != "diagnosing":
+        return None
+    m = re.fullmatch(r"agent run (.+) started", last["cause"] or "")
+    return m.group(1) if m else None
 
 
 def release(store, incident_id: str, trace_id: str, cause: str) -> bool:
-    """diagnosing -> open: the run could not finish (the model was unreachable)."""
-    return lifecycle.release(store, incident_id, f"agent run {trace_id}: {cause}")
+    """diagnosing -> open: the run could not finish (the model was unreachable). Only the run
+    holding the incident may hand it back; False otherwise."""
+    with store.transaction():
+        if holder(store, incident_id) != trace_id:
+            return False
+        return lifecycle.release(store, incident_id, f"agent run {trace_id}: {cause}")
 
 
 def save_checkpoint(store, state: dict) -> None:
@@ -116,7 +155,8 @@ def save_checkpoint(store, state: dict) -> None:
 
 
 def unfinished(store, asset_id: str | None = None) -> list[dict]:
-    """Checkpoints of runs that stopped before writing their trace (the agent died mid-run)."""
+    """Checkpoints of runs that stopped before writing their trace (the agent died mid-run) and still
+    hold their incident: the runs to resume."""
     rows = store.query("SELECT c.* FROM agent_checkpoints c WHERE c.node <> ? AND NOT EXISTS "
                        "(SELECT 1 FROM agent_traces t WHERE t.trace_id = c.trace_id) ORDER BY c.updated_at",
                        ["end"], table="agent_checkpoints")
@@ -124,7 +164,31 @@ def unfinished(store, asset_id: str | None = None) -> list[dict]:
         ids = {r["incident_id"] for r in store.query("SELECT incident_id FROM incidents WHERE asset_id = ?",
                                                      [asset_id])}
         rows = [r for r in rows if r["incident_id"] in ids]
-    return rows
+    return [r for r in rows if holder(store, r["incident_id"]) == r["trace_id"]]
+
+
+def stale_runs(store, asset_id: str, older_than_s: float, now=None) -> list[dict]:
+    """Incidents still in diagnosing more than ``older_than_s`` after a run claimed them: the run
+    stopped or hung, or ended without moving the incident (its brief and its hand-back both failed
+    to be written). ``state`` is the checkpoint to resume from, when the run left one past its
+    first step and wrote no trace; otherwise None, and the incident is to be handed back."""
+    now = to_utc(now) if now is not None else dt.datetime.now(dt.timezone.utc)
+    out = []
+    for inc in store.query("SELECT incident_id FROM incidents WHERE asset_id = ? AND state = ?",
+                           [asset_id, "diagnosing"]):
+        trace_id = holder(store, inc["incident_id"])
+        if trace_id is None:
+            continue
+        claimed = store.one("SELECT at FROM incident_events WHERE incident_id = ? ORDER BY id DESC LIMIT 1",
+                            [inc["incident_id"]], table="incident_events")
+        if (now - to_utc(claimed["at"])).total_seconds() < older_than_s:
+            continue
+        finished = store.one("SELECT 1 AS done FROM agent_traces WHERE trace_id = ?", [trace_id]) is not None
+        cp = None if finished else store.one("SELECT state FROM agent_checkpoints WHERE trace_id = ? AND node NOT "
+                                             "IN (?, ?)", [trace_id, "start", "end"], table="agent_checkpoints")
+        out.append({"incident_id": inc["incident_id"], "trace_id": trace_id, "claimed_at": claimed["at"],
+                    "finished": finished, "state": cp["state"] if cp else None})
+    return out
 
 
 def outage_tries(store, incident_id: str) -> list[dict]:
