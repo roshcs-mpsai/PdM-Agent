@@ -20,6 +20,11 @@ unsure). The seconds from the first showing of an item to its answer are measure
 browser; showing an item again (a page reload) does not restart the clock. An item shows the latest
 valid brief of its arm at the time it is shown.
 
+The tools of the cited results can still give an arm away: a retrieval-only brief cites only the
+incident context and search_knowledge, while a full brief usually cites checks and data reads too.
+Without the tool names the evidence would be hard to read, so they are shown; the study's write-up
+should say so.
+
 Participants are reviewers signed in with their own token (``PDM_TOKEN_REVIEWER_<NAME>``); the role
 token, which names nobody, is refused. A participant is recorded as ``P-`` and the first 8 hex digits
 of SHA-256(PDM_STUDY_SALT + name). Nothing a participant receives names a reviewer or an arm. The

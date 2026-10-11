@@ -174,7 +174,7 @@ over OPC UA. `tools/verify_local.sh --journey-a` runs the same steps, approving 
    `--speed 1000 --from 2020-07-07T00:00:00 --to 2020-07-16T06:00:00` is the span on which
    tests/test_pipeline.py gets incidents at Jul 14 02:33 and Jul 15 00:46.
 2. **The incident.** `docker compose logs -f gate` shows it open. The dashboard's Assets page shows
-   the asset at maintenance required with the incident. From a shell:
+   the asset at maintenance required, or failure (step 6), with the incident. From a shell:
 
    ```bash
    TOKEN="$(grep '^PDM_TOKEN_OPERATOR=' .env | cut -d= -f2-)"
@@ -202,20 +202,22 @@ over OPC UA. `tools/verify_local.sh --journey-a` runs the same steps, approving 
    node-red-contrib-opcua) to `opc.tcp://localhost:4840/pdm/` with security None and an anonymous
    session. Look up the namespace `urn:pdm-agent`, browse Objects, PdM, the asset, and read `NE107`,
    `NE107Code`, `IncidentId` and `IncidentState`. While the incident is open and data flows, NE107
-   reads `maintenance_required`. Five minutes of wall time after the last window (`ne107.no_data_after`
-   in the profile) it reads `function_check`, the no-data state: read it soon after the replay, or
-   keep one running.
+   reads `maintenance_required`, and `failure` while the windows also show the continuous-load
+   signature. In the full-campaign replay (eval/pipeline.py) that held from Jul 14 23:36 to Jul 15
+   18:28 stream time, most of this span, so the value you read depends on when you read it. Five
+   minutes of wall time after the last window (`ne107.no_data_after` in the profile) it reads
+   `function_check`, the no-data state: read it soon after the replay, or keep one running.
 
 ## Where to look when something fails
 
 1. `docker compose ps -a`: which service is unhealthy, restarting or exited, and its exit code.
 2. `docker compose logs --tail 100 <service>`: one JSON object per line. Lines written while a
    service works on an incident carry its id: `docker compose logs | grep INC-<asset>-<time>`.
-3. Prometheus, http://localhost:9090/targets: every job up except `south` (the adapter serves no
-   /metrics yet). /alerts shows the firing rules. Grafana has the service-health and model-health
-   dashboards.
-4. Jaeger, http://localhost:16686: service `agent`, tag `incident_id=<id>` (ops/README.md). See known
-   limits: no service exports spans yet.
+3. Prometheus, http://localhost:9090/targets: every job up, `south` included. /alerts shows the
+   firing rules. Grafana has the service-health and model-health dashboards.
+4. Jaeger, http://localhost:16686: service `agent` or `mcp_server`, tag `incident_id=<id>`
+   (ops/README.md). The two export spans when the OpenTelemetry SDK is installed (requirements.txt
+   lists it); without it each logs `tracing off` once and sends none.
 5. The store:
 
    ```bash
@@ -356,3 +358,13 @@ Gaps known now:
   simulator). A maintenance system elsewhere needs north with masquerading on (drop its
   `driver_opts` in `compose.yaml`), at the cost of a route out for every service on north.
 - The `south` adapter and the replayer must not feed ingest at the same time; nothing enforces it.
+- No service reports a model promotion. NE 107's function-check state has an input for one
+  (lib/pdm_common/status.py), but eval/promote.py only moves an MLflow alias, and the detector and
+  prognostics serve the bundle eval/config.yaml pins until they restart, so there is no promotion
+  in progress to report.
+- The agent checks its token budget between model calls, so a run can go over 50,000 tokens by
+  the one call that crossed it (at most 8,000 output tokens plus that call's input). The wall-time
+  budget also bounds each model call.
+- A run that stops without finishing (a crash, or writes to the store that failed) keeps its
+  incident in diagnosing until the agent's first tick after `outage.stale_after_s` (600 s): the
+  agent then resumes it from its checkpoint, or hands the incident back to open.
