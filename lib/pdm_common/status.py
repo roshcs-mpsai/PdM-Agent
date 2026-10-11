@@ -17,6 +17,10 @@ section 8, with the profile's ``ne107`` thresholds):
   yet, or the upper bound of P(72 h) exceeds ``maintenance_p72_upper``;
 * good -- none of these.
 
+No service sets ``promotion`` yet: a promotion moves an MLflow alias, and the running
+services keep the bundles eval/config.yaml pins until they restart, so there is no
+in-progress state to report (docs/RUNBOOK.md, known limits).
+
 Two readings of the FRD are ours: the continuous-load signature counts only
 inside an open incident (alone it fires in 1 % of healthy windows by
 construction of its threshold), and an incident still waiting for its

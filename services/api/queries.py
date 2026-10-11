@@ -21,11 +21,6 @@ def _true(store):
     return True if store.dialect == "postgres" else 1
 
 
-def _db(store, table: str, column: str, value):
-    from pdm_common.store import _to_db
-    return _to_db(table, column, value, store.dialect)
-
-
 def asset_ids(store) -> list[str]:
     rows = store.query("SELECT asset_id FROM scores UNION SELECT asset_id FROM incidents "
                        "UNION SELECT asset_id FROM prognoses")

@@ -634,3 +634,13 @@ def test_stop_takes_no_more_rows(store):
     counts = conn.run_once(NOW)
     assert counts["due"] == 1 and counts["pending"] == 1 and sum(counts[k] for k in connector_service.RUN_KEYS[1:]) == 0
     assert wo(store)["status"] == "queued"
+
+
+def test_an_order_sent_after_the_episode_ended_closes_the_incident(store):
+    incident(store)
+    store.update("incidents", {"incident_id": IID}, {"episode_closed_at": "2020-07-15T09:00:00Z"})
+    approve(store)
+    assert make(store, sim_client()).run_once(NOW)["sent"] == 1
+    assert state(store) == "closed"
+    moves = [(e["from_state"], e["to_state"], e["actor"]) for e in lifecycle.history(store, IID)][-2:]
+    assert moves == [("approved", "sent", "connector"), ("sent", "closed", "connector")]

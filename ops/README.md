@@ -162,9 +162,10 @@ with tracing.incident_trace(incident_id, trace_id=run_id, arm="full"):
 
 - `configure` exports over OTLP/HTTP to `$OTEL_EXPORTER_OTLP_ENDPOINT` (default
   `http://otel-collector:4318`; from a host process use `http://localhost:4318`).
-  It needs `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http` in the
-  agent's and MCP server's requirements (not added yet). Without them it logs once
-  `tracing off ...` and every span is a no-op. `OTEL_SDK_DISABLED=true` turns it off.
+  It needs `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http`, which
+  requirements.txt lists (the build environment had neither, so export was not run
+  there). Without them it logs once `tracing off ...` and every span is a no-op.
+  The agent and the MCP server call it at start. `OTEL_SDK_DISABLED=true` turns it off.
 - `incident_trace` always starts a new trace: one trace per agent run, with
   `incident_id` (and `trace_id`) on the root span and on every log line inside.
   A retried run on the same incident is a second trace with the same tag.
@@ -234,8 +235,10 @@ the OpenTelemetry API (no SDK, no exporter). So:
 - `tracing.configure` with the real SDK and exporter was not run; the test uses
   stand-in modules. Spans have not reached a collector or Jaeger, so the trace search
   by tag is described, not demonstrated.
-- The metric names are not wired into the services yet (the lead does that), so no
-  service exports them today, and the 10x latency figure does not exist yet.
+- Every long-running service exports its metrics (ingest, detector, gate, prognostics,
+  drift, the agent and opcua_north through `pdm_common.mqtt.run_service`; the tool server,
+  API, connector and south adapter on their own), but only in-process tests have read
+  them; the 10x latency figure needs the stack running and does not exist yet.
 - What was run: tests/test_metrics.py (exposition read back by a parser, concurrent
   increments, the HTTP endpoint on a free port, the dashboards and rules against the
   catalogue) and tests/test_logs.py (JSON lines, context, exceptions, the no-op and

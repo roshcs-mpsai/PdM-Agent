@@ -282,16 +282,7 @@ The work was done where Docker, Mosquitto, paho-mqtt and gitleaks are not availa
 - `run_service` and `read_retained` ran against a fake paho module.
 - gitleaks itself was not run; its built-in rules may flag things `tools/secret_scan.py`
   does not.
-- The compose service above, its health check and the laptop checks have not been run.
-
-## Lines this needs in other files
-
-`.gitignore`:
-
-```text
-# broker secrets (R3): password hashes and TLS keys, from tools/broker_users.py and tools/make_certs.sh
-mosquitto/config/passwd
-mosquitto/certs/
-```
-
-CI (`.github/workflows/ci.yml`), right after `actions/setup-python`: `- run: python tools/secret_scan.py`.
+- The secure broker's compose override (mosquitto/compose.secure.yaml), its health check and
+  the laptop checks have not been run.
+- The lines this needs elsewhere are in place: `.gitignore` keeps `mosquitto/config/passwd`
+  and `mosquitto/certs/` out of git, and CI runs `python tools/secret_scan.py` first.

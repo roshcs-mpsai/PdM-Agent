@@ -19,9 +19,10 @@ For each row it:
    ``Idempotency-Key: <decision id>`` (INT-04), then:
 
    * 2xx: sent, with the endpoint's reference; the incident moves approved ->
-     sent (actor connector) in the same transaction. A 200 the endpoint marks
-     as a replay is a request it had already received (a lost response): the
-     same order, counted as a duplicate;
+     sent (actor connector) in the same transaction, and on to closed when its
+     alarm episode has already ended (otherwise the gate closes it when the
+     episode ends). A 200 the endpoint marks as a replay is a request it had
+     already received (a lost response): the same order, counted as a duplicate;
    * 409: blocked, conflict. The endpoint holds a different body for this
      approval; the connector never resends it on its own;
    * 401, 403, 422 and any other 4xx except 408 and 429: blocked,
@@ -206,6 +207,10 @@ class Connector:
                     lifecycle.transition(self.store, incident_id, "sent", ACTOR,
                                          f"work order {wo_id} sent, reference {reference or 'not given'}",
                                          at=now, expect="approved")
+                    if incident.get("episode_closed_at"):     # the alarm is already over: nothing left open
+                        lifecycle.transition(self.store, incident_id, "closed", ACTOR,
+                                             f"work order {wo_id} sent after the alarm episode closed",
+                                             at=now, expect="sent")
                 except lifecycle.IllegalTransition as exc:
                     log.error("work order %s is sent but incident %s did not move to sent: %s", wo_id, incident_id,
                               exc, extra={"incident_id": incident_id, "wo_id": wo_id})
@@ -277,8 +282,8 @@ class Connector:
     def _incident(self, incident_id) -> Optional[dict]:
         if not incident_id:
             return None
-        return self.store.one("SELECT incident_id, asset_id, state FROM incidents WHERE incident_id = ?",
-                              [incident_id])
+        return self.store.one("SELECT incident_id, asset_id, state, episode_closed_at FROM incidents "
+                              "WHERE incident_id = ?", [incident_id])
 
     def update_pending(self) -> int:
         """Set pdm_work_orders_pending to the rows queued or failed; returns the number."""

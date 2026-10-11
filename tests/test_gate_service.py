@@ -298,3 +298,18 @@ def test_reopening_the_same_incident_is_a_no_op(store):
 def test_the_opening_cause_reads_like_the_profile():
     assert [gate_service.short_duration(n * 10**9) for n in (1800, 21600, 86400, 90, 0)] == \
         ["30min", "6h", "1d", "90s", "0s"]
+
+
+def test_a_sent_incident_closes_when_its_episode_ends(service, store):
+    outs = feed(service, [1.0] * 40 + [9.0] * 60)
+    iid = incident_messages(outs, service)[0]["incident_id"]
+    for to, actor in (("diagnosing", "agent"), ("awaiting_review", "agent"), ("approved", "reviewer:rosh"),
+                      ("sent", "connector")):
+        lifecycle.transition(store, iid, to, actor, "test")
+    status = status_of(feed(service, [1.0] * 5, start=100), service)
+    assert status["incident_state"] == "sent" and status["ne107"] == "maintenance_required"
+    outs = feed(service, [1.0] * (6 * 60 + 30), start=105)
+    assert [m["event"] for m in incident_messages(outs, service)] == ["episode_closed"]
+    assert store.select("incidents", {"incident_id": iid})[0]["state"] == "closed"
+    assert lifecycle.history(store, iid)[-1]["actor"] == "system"
+    assert status_of(outs, service)["ne107"] == "good"                     # nothing open: the asset is good again

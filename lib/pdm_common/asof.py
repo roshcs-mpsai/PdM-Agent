@@ -14,7 +14,6 @@ that data from the store with the same pipeline ingest runs:
 """
 from __future__ import annotations
 
-import datetime as dt
 
 import numpy as np
 import pandas as pd
@@ -81,5 +80,3 @@ def evidence_asof(store, profile: dict, events: dict, asset: str, opens, lookbac
     return Evidence(opens, grid, window, profile=profile, events=events)
 
 
-def now_utc() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)

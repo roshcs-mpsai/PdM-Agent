@@ -206,13 +206,27 @@ class GateService:
             if self.store is not None and current:
                 self.store.update("incidents", {"incident_id": current}, {"last_pass_at": _iso_ns(event.at_ns)})
             return []
-        # close: the episode went quiet for the hold-off; the lifecycle carries on
+        # close: the episode went quiet for the hold-off; the lifecycle carries on, except that an
+        # incident whose work order is already sent is now done
         self.counts["closed"] += 1
         if self.store is not None and current:
             self.store.update("incidents", {"incident_id": current},
                               {"episode_closed_at": _iso_ns(event.at_ns), "last_pass_at": _iso_ns(event.at_ns
                                                                                                  - self.params.hold_off_ns)})
+            self._close_if_sent(current, _iso_ns(event.at_ns))
         return [self._incident_message("episode_closed", event, current)]
+
+    def _close_if_sent(self, incident_id: str, at: str) -> None:
+        row = self.store.one("SELECT state FROM incidents WHERE incident_id = ?", [incident_id])
+        if row is None or row["state"] != "sent":
+            return
+        try:
+            lifecycle.transition(self.store, incident_id, "closed", "system",
+                                 "the work order was sent and the alarm episode closed", at=at, expect="sent")
+            log.info("incident %s closed: work order sent, episode closed", incident_id,
+                     extra={"incident_id": incident_id})
+        except lifecycle.IllegalTransition:      # moved meanwhile: the connector or a person closed it
+            pass
 
     def _evidence(self, opened_iso: str) -> dict:
         """The checks on the data as of the opening, and the triage rules' verdicts."""

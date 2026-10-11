@@ -9,7 +9,9 @@ insert-only incident_events table with who made it, when and why:
 Only the gate opens an incident; only the agent moves it to diagnosing and to
 awaiting_review (insufficient and budget-exhausted briefs too, so the planner
 always sees the alarm); only a reviewer approves or rejects; only the
-connector marks an approved order sent. Anything else is refused
+connector marks an approved order sent. A sent incident closes when its alarm
+episode is over: the gate closes it when the episode ends, or the connector at
+once if the episode ended before the order went out. Anything else is refused
 (``IllegalTransition``). The agent may also hand a claimed incident back,
 diagnosing -> open, when the language model cannot be reached (``release``):
 the incident stays on the dashboard as a raw alert and the next try claims it

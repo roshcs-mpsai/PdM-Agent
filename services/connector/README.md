@@ -142,4 +142,5 @@ transaction, and each case of `send_problems`.
   system have not been tried; psycopg is not installed where this was written.
 - An `http://` endpoint on another host gets a warning at start-up (the token
   would cross the network unencrypted), not a refusal.
-- There is no compose service for the connector yet.
+- compose.yaml runs it (with the work-order simulator as the endpoint), but the
+  stack has not been started where this was written (docs/RUNBOOK.md, known limits).
