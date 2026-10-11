@@ -151,12 +151,6 @@ def scale(windows: pd.DataFrame, features: list, roles: np.ndarray) -> Scaled:
     return Scaled(list(features), (filled - mean) / std, median, mean, std, is_fit, fit_rows)
 
 
-def apply_scaler(X_raw: np.ndarray, median, mean, std) -> np.ndarray:
-    """The same scaling for windows scored later (the detector service)."""
-    X_raw = np.asarray(X_raw, dtype=float)
-    return (np.where(np.isnan(X_raw), median, X_raw) - mean) / std
-
-
 # --- the judging context --------------------------------------------------------------
 
 @dataclass

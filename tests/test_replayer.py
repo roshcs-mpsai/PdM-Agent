@@ -116,17 +116,18 @@ def test_step_wait_paces_and_caps():
 
 def test_cli_dry_run(tmp_path, synthetic_csv):
     """The CLI wires up end to end without a broker."""
-    log = tmp_path / "cli.log"
+    log, manifest = tmp_path / "cli.log", tmp_path / "manifest.json"
     result = subprocess.run(
         [sys.executable, str(ROOT / "services" / "replayer" / "replayer.py"),
          "--profile", str(PROFILE_PATH), "--data", str(synthetic_csv),
          "--dry-run", "--speed", "1000000", "--log", str(log),
-         "--progress-every", "0"],
+         "--progress-every", "0", "--manifest", str(manifest)],
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
     assert "replayed 12 of 12 rows" in result.stdout
     assert len(log.read_text().splitlines()) == 12
+    assert json.loads(manifest.read_text())["schema"] == "replay_manifest_v1"
 
 
 @pytest.mark.skipif(

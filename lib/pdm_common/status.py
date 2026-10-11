@@ -91,11 +91,6 @@ def ne107(x: StatusInputs, params: dict) -> tuple[str, list[str]]:
     return "good", []
 
 
-def r0_status(alert: bool) -> str:
-    """Walking-skeleton status: the alert flag only, no gate. Kept for the R0 tests."""
-    return "out_of_specification" if alert else "good"
-
-
 def marker(state: str) -> str:
     """Dashboard colour for an NE 107 state; unknown states show amber."""
     return MARKER.get(state, "amber")

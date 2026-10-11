@@ -148,11 +148,16 @@ def test_a_run_of_the_library_and_its_audit(base):
     assert s["runs_scored"] == 3 and s["trajectory_correctness"] == 1.0
     assert s["claims_auto_unsupported"] == 0 and s["revalidation_problems"] == 0
     assert s["budget_exhausted"] == 1 and s["insufficient_briefs"] >= 1
+    e = s["expectations"]                     # T01 accepts two states, T02 one, T03 states none
+    assert (e["evidence_state"]["stated"], e["evidence_state"]["single"]) == (2, 1)
+    assert e["action"]["stated"] == 0 and e["action"]["match"] is None
     rows = {r["id"]: r for r in result["incidents"]}
     assert rows["T01"]["trajectory"]["observed"][:4] == list(run_incidents_core())
     assert rows["T03"]["trajectory"]["correct"] and rows["T03"]["outcome_ok"]
     md = (out / "report.md").read_text()
     assert "Trajectory correctness (target 90 %) | 100 %" in md and "| T04 | gate | not_found |" in md
+    assert "Action as expected | no incident states one |" in md
+    assert "of the 2 incidents that state one;" in md and "of the 1 that accept a single state" in md
     assert (out / "claims.csv").exists()
 
 

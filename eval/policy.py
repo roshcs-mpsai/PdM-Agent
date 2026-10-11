@@ -104,7 +104,7 @@ class RulesModel:
     name: str = "rules"
     calls: list = field(default_factory=list)
 
-    def create(self, system: str, tools: list, messages: list) -> Turn:
+    def create(self, system: str, tools: list, messages: list, time_left: Optional[float] = None) -> Turn:
         offered = [t["name"] for t in tools]
         self.calls.append({"tools": offered, "turn": len(self.calls) + 1})
         blocks = self.step(offered, messages)
