@@ -193,16 +193,34 @@ def test_lines_carry_the_opentelemetry_ids_of_a_valid_current_span(json_log):
 
 @pytest.fixture()
 def fresh_tracing(monkeypatch):
-    """tracing as if not yet configured, and without a cached tracer."""
+    """tracing as if not yet configured, without a cached tracer, and with OpenTelemetry's global
+    tracer provider back to its default (the API alone): whether the SDK is installed, or an
+    earlier test configured it, changes nothing here, and nothing set here outlives the test."""
     monkeypatch.setattr(tracing, "_configured", None)
     monkeypatch.setattr(tracing, "_tracer", None)
     for var in ("OTEL_SDK_DISABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
                 "OTEL_SERVICE_NAME"):
         monkeypatch.delenv(var, raising=False)
+    try:
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.util._once import Once
+    except ImportError:
+        return monkeypatch
+    monkeypatch.setattr(otel_trace, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(otel_trace, "_TRACER_PROVIDER_SET_ONCE", Once())
+    monkeypatch.setattr(otel_trace, "_PROXY_TRACER_PROVIDER", otel_trace.ProxyTracerProvider())
     return monkeypatch
 
 
+def _without_the_sdk(monkeypatch):
+    """As if opentelemetry-sdk and the OTLP exporter were not installed (CI installs them)."""
+    for name in ("opentelemetry.sdk", "opentelemetry.sdk.resources", "opentelemetry.sdk.trace",
+                 "opentelemetry.sdk.trace.export", "opentelemetry.exporter.otlp.proto.http.trace_exporter"):
+        monkeypatch.setitem(sys.modules, name, None)
+
+
 def test_configure_without_the_sdk_logs_once_that_tracing_is_off(fresh_tracing, caplog):
+    _without_the_sdk(fresh_tracing)
     with caplog.at_level(logging.INFO, logger="pdm.tracing"):
         assert tracing.configure("agent") is False
         assert tracing.configure("agent") is False
