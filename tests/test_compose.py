@@ -639,6 +639,21 @@ def ignored(path: str, patterns) -> bool:
     return out
 
 
+def _tracked(folder: str) -> list[str]:
+    """The files git tracks under ``folder`` (what the image is built from); outside a git
+    checkout, every file but caches and the operating system's clutter (Finder's .DS_Store)."""
+    try:
+        out = subprocess.run(["git", "ls-files", "-z", "--", folder], cwd=ROOT, capture_output=True, check=True)
+        files = [f for f in out.stdout.decode().split("\0") if f]
+        if files:
+            return files
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return [p.relative_to(ROOT).as_posix() for p in (ROOT / folder).rglob("*")
+            if p.is_file() and "__pycache__" not in p.parts and ".egg-info" not in str(p)
+            and p.name not in (".DS_Store", "Thumbs.db")]
+
+
 def test_dockerignore_keeps_data_runs_notebooks_and_secrets_out():
     patterns = _ignore_patterns()
     out = ["data/MetroPT3(AirCompressor).csv", "data/processed_v4/grid_10s.csv.gz", "data/catalogue.jsonl",
@@ -651,8 +666,7 @@ def test_dockerignore_keeps_data_runs_notebooks_and_secrets_out():
     kept = ["requirements.txt", "services/dashboard/requirements.txt", "lib/pyproject.toml", ".env.example",
             "docker/Dockerfile", ".github/workflows/ci.yml", "tools/workorder_sim.py", "db/init/001_schema.sql"]
     for folder in ("lib", "services", "profiles", "eval/frozen", "corpus", "skills", "checks", "schemas", "ops"):
-        kept += [p.relative_to(ROOT).as_posix() for p in (ROOT / folder).rglob("*")
-                 if p.is_file() and "__pycache__" not in p.parts and ".egg-info" not in str(p)]
+        kept += _tracked(folder)
     kept.append("eval/config.yaml")
     assert [p for p in kept if ignored(p, patterns)] == []
 

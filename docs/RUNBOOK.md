@@ -341,7 +341,7 @@ What needs a laptop, because it was never run in the sandbox:
 | Docker | the image was never built and the stack never started; every health check, `depends_on` and network rule is untested at run time, including masquerading off on south, north and ops, and the published ports |
 | Third-party images | the health checks of prometheus and grafana (busybox `wget`) and jaeger (its `status` command) were written from their documentation; the collector's image has no shell, so it has no container health check, and verify_local.sh asks its :13133 instead |
 | paho-mqtt | no service has talked to a broker in the sandbox; mosquitto.secure.conf, the ACL and `passwd` have not been loaded by Mosquitto |
-| asyncua | opcua_north, the south OPC UA adapter and the simulated plant's OPC UA server have not run; the SCADA read in verify_local.sh is untested |
+| asyncua | ran only in tests (asyncua 2.1.0): opcua_north's server, and the simulated plant's server read by the south client; the services' `main()`, the secure endpoint and the SCADA read in verify_local.sh are untested |
 | streamlit, plotly | the dashboard has not been served by Streamlit in the sandbox |
 | MLflow | no bundle has been registered; the server image has not run |
 | LangGraph | `services/agent/graph.py` is untested |

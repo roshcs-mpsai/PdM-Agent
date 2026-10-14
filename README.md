@@ -151,8 +151,12 @@ regenerated file with `docker compose exec -T postgres psql -U pdm -d pdm < db/i
 What is built, and how far it has been tried. The build sandbox has no Docker daemon, no broker,
 no PostgreSQL and no model key, and lacks paho-mqtt, asyncua, streamlit, MLflow, LangGraph and the
 OpenTelemetry SDK, so every service has run there in process only: on SQLite, on the in-memory bus
-of eval/pipeline.py or against stand-ins. The last column is what still waits for a laptop; the
-service READMEs say more. Tests marked (data) run only where `data/` holds the dataset.
+of eval/pipeline.py or against stand-ins. On Oct 13 the suite also ran on a Mac with all of
+requirements.txt installed (paho-mqtt, asyncua 2.1.0, MLflow and the OpenTelemetry SDK among them):
+957 passed, and the five failures it showed are fixed (asyncua 2's new module for its user
+classes, three tracing tests that assumed the SDK absent, and a test tripped by Finder's
+.DS_Store). The last column is what still waits for a laptop; the service READMEs say more. Tests
+marked (data) run only where `data/` holds the dataset.
 
 | Part | Tests | Not run yet |
 |---|---|---|
@@ -167,8 +171,8 @@ service READMEs say more. Tests marked (data) run only where `data/` holds the d
 | api | test_api.py: tokens, roles, decisions, the audit rebuild, on SQLite | PostgreSQL |
 | dashboard | test_dashboard.py and test_status_view.py (services/dashboard/README.md) | served by Streamlit |
 | connector | test_connector.py: against the simulator, retries, tamper checks | PostgreSQL; a real maintenance system |
-| opcua_north | test_opcua_north.py: the read-only model; the asyncua binding against a stand-in | asyncua; a SCADA client |
-| south | test_south.py, test_cip.py, test_workorder_sim.py, without a broker | paho-mqtt, asyncua, Node-RED, a CIP device |
+| opcua_north | test_opcua_north.py: the read-only model; the asyncua server itself where asyncua is installed (browse, read, subscribe; writes and calls refused) | a SCADA client; the secure endpoint |
+| south | test_south.py, test_cip.py, test_workorder_sim.py, without a broker; one live OPC UA round trip where asyncua is installed | a broker, Node-RED, a CIP device |
 | store | test_store.py on SQLite; `PDM_TEST_PG` runs it on PostgreSQL | PostgreSQL |
 | broker security | test_broker_security.py (ACL evaluator, password hashes), test_secrets.py | a broker loading the secure config |
 | observability | test_metrics.py, test_metrics_wiring.py, test_logs.py | Prometheus, Grafana, the collector, Jaeger; span export |
