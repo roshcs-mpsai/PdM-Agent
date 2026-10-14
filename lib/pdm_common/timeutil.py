@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 UTC = dt.timezone.utc
 
+_FRACTION = re.compile(r"(?<=:\d\d)\.(\d+)")          # the fraction of the seconds in an ISO time
 _DURATION = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(s|min|h|d)\s*$")
 _UNIT_SECONDS = {"s": 1, "min": 60, "h": 3600, "d": 86400}
 
@@ -36,6 +37,8 @@ def to_utc(value, tz: str = "UTC") -> dt.datetime:
         text = value.strip()
         if text.endswith(("Z", "z")):
             text = text[:-1] + "+00:00"
+        # Python 3.10 reads only 3 or 6 digits of fraction: write it as 6 (".5" is ".500000")
+        text = _FRACTION.sub(lambda m: "." + (m.group(1) + "000000")[:6], text, count=1)
         try:
             moment = dt.datetime.fromisoformat(text)
         except ValueError as exc:
