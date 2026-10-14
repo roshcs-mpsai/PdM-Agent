@@ -39,15 +39,20 @@ COPY services/dashboard/requirements.txt ./services/dashboard/requirements.txt
 RUN pip install -r requirements.txt -r services/dashboard/requirements.txt
 
 # The shared library, pdm_common, as every service imports it.
+# Files copied from a folder with owner-only permissions (a OneDrive folder gives -rw-------) would be
+# unreadable to the pdm user below, and pip would install pdm_common with the same modes. a+rX makes
+# everything readable (and folders listable) while root keeps ownership, so a service still cannot
+# change its code.
 COPY lib ./lib
-RUN pip install ./lib
+RUN chmod -R a+rX lib && pip install ./lib
 
 COPY . .
 
 # An unprivileged user. The code stays owned by root, so a service cannot change it; runs/ is the
 # one place the services write (quarantine, reconciliation, replay manifests, candidate requests),
 # and compose mounts a volume there, which takes this owner on first use.
-RUN useradd --create-home --uid 10001 --user-group pdm \
+RUN chmod -R a+rX /app \
+    && useradd --create-home --uid 10001 --user-group pdm \
     && mkdir -p /app/runs \
     && chown pdm:pdm /app/runs
 USER pdm
