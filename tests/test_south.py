@@ -13,6 +13,7 @@ import asyncio
 import datetime as dt
 import json
 import re
+import socket
 import struct
 import sys
 from collections import Counter
@@ -1029,6 +1030,57 @@ def test_csv_through_opcua_matches_the_replayer(tmp_path, profile, spec):
     for out in outs:
         service.handle(out.payload)
     assert (service.counts["accepted"], service.counts["quarantined"]) == (30, 0)
+
+
+def test_csv_through_a_live_opcua_server_matches_the_replayer(tmp_path, profile):
+    """The same rows over a real OPC UA connection: scada_sim's asyncua server, the read-only
+    client and its subscription handler, then the mapper. Needs asyncua (CI installs it)."""
+    pytest.importorskip("asyncua")
+    from asyncua import Client
+
+    path = write_csv(tmp_path / "rows.csv", profile, rows=5)
+    published = replayed(profile, path)
+    rows = list(scada_sim.read_rows(profile, path))
+    per_row = len(signal_names(profile))                 # every signal changes on every row
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        endpoint = f"opc.tcp://127.0.0.1:{s.getsockname()[1]}/scada-sim/"
+
+    class Counting(opcua_client.SubscriptionHandler):
+        seen = 0
+
+        def datachange_notification(self, node, val, data):
+            self.seen += 1
+            super().datachange_notification(node, val, data)
+
+    async def until(handler, n, timeout=10.0):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while handler.seen < n:
+            assert loop.time() < deadline, f"{handler.seen} of {n} data changes arrived"
+            await asyncio.sleep(0.02)
+
+    async def scenario():
+        sim = scada_sim.OpcUaServerSim(profile, endpoint=endpoint)
+        await sim.start()
+        try:
+            await sim.write_row(*rows[0])                # before subscribing: the first values are row 0's
+            mapper, outs = opcua_client.OpcUaMapper(profile), []
+            async with opcua_client.ReadOnlyClient(Client(url=endpoint)) as client:
+                nodes = [client.get_node(node_id) for node_id in mapper.node_ids]
+                handler = Counting(mapper, {n.nodeid: nid for n, nid in zip(nodes, mapper.node_ids)}, outs.append)
+                sub = await client.create_subscription(20, handler)
+                await sub.subscribe_data_change(nodes, queuesize=10, sampling_interval=0)
+                await until(handler, per_row)
+                for k, (ts, values) in enumerate(rows[1:], start=2):
+                    await sim.write_row(ts, values)
+                    await until(handler, per_row * k)
+                await sub.delete()
+            return outs + mapper.flush()
+        finally:
+            await sim.stop()
+
+    assert_matches_replayer(asyncio.run(scenario()), published, profile)
 
 
 class FakeServer:

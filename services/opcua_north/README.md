@@ -4,7 +4,7 @@ Read-only OPC UA server for SCADA: each asset's anomaly score, prognosis and
 NE 107 status (T21; INT-01 to INT-03).
 
 ```bash
-pip install 'asyncua>=1.1'
+pip install 'asyncua>=1.1,<3'
 
 # demo: no security, anonymous sessions (still read-only)
 python services/opcua_north/server.py --profile profiles/metropt3_apu/asset_profile.yaml --anonymous
@@ -151,19 +151,17 @@ order, so asyncua objects are only used from their own loop. On Ctrl-C,
 
 ## Not verified here
 
-asyncua could not be installed where this was written, so:
-
-- The asyncua binding has not run against asyncua.
-  `test_the_asyncua_server_serves_read_only_nodes` is skipped here. It has to
-  pass on a laptop (`pip install 'asyncua>=1.1'`, then
-  `pytest tests/test_opcua_north.py`) before the demo relies on the server.
-  The binding was run against a stand-in that records calls. That checks the
-  threading, the update order, the start-up self-check and the shutdown, not
-  asyncua's API.
-- These parts of asyncua's API are used as we know them from asyncua 1.x:
-  `DataValue(StatusCode_=...)`, `set_security_policy(..., permission_ruleset=)`,
-  `Server(user_manager=)` and `iserver.user_manager`. If the laptop test fails,
-  look at these first.
+- The binding has run against asyncua 2.1.0, the version `pip install -r
+  requirements.txt` gave on Oct 13: `test_the_asyncua_server_serves_read_only_nodes`
+  browses, reads and subscribes, and has writes, calls and node management
+  refused. asyncua 2 moved `User` and `UserRole` to
+  `asyncua.crypto.permission_rules`; the server imports them from either place,
+  but asyncua 1.x has not been tried since. requirements.txt allows 1.1 up to,
+  not including, 3.
+- These parts of asyncua's API are the ones most likely to move in a later
+  version: `DataValue(StatusCode_=...)`, `set_security_policy(...,
+  permission_ruleset=)`, `Server(user_manager=)` and `iserver.user_manager`. If
+  the test fails after an upgrade, look at these first.
 - The secure endpoint (certificate, key, username login) has never been run,
   and no test covers it.
 - No SCADA client (Node-RED, Ignition) has browsed the server yet. That is the

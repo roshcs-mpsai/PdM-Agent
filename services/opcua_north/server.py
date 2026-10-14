@@ -495,7 +495,10 @@ class OpcUaServer:
 
     async def start(self) -> None:
         from asyncua import Server, ua
-        from asyncua.server.users import User, UserRole
+        try:
+            from asyncua.crypto.permission_rules import User, UserRole    # asyncua 2
+        except ImportError:
+            from asyncua.server.users import User, UserRole               # asyncua 1.x
 
         self._ua = ua
         users = ReadOnlyUsers(User, UserRole, anonymous=self.anonymous, username=self.username,
@@ -733,7 +736,7 @@ def main(argv=None) -> None:
     try:
         import asyncua  # noqa: F401
     except ImportError:
-        raise SystemExit("opcua_north: asyncua is not installed: pip install 'asyncua>=1.1'")
+        raise SystemExit("opcua_north: asyncua is not installed: pip install 'asyncua>=1.1,<3'")
     runner = ServerThread(OpcUaServer(space, args.endpoint, anonymous=args.anonymous, cert=args.cert, key=args.key,
                                       username=username, password=password))
     try:

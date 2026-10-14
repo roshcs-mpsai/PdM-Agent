@@ -25,8 +25,9 @@ The message building is pure (EdgeNodeSim, sparkplug_messages,
 opcua_updates): tests/test_south.py runs CSV -> these messages -> the
 adapters -> telemetry_json_v1 and compares the result with the replayer's
 messages, without a broker. main() imports paho-mqtt (and asyncua with
---opcua) when it runs; neither is installed where this was written, so main()
-has only been run with --dry-run.
+--opcua) when it runs; it has only been run with --dry-run. The OPC UA server
+class serves rows to the south client in tests/test_south.py when asyncua is
+installed.
 
     python services/south/scada_sim.py --profile profiles/metropt3_apu/asset_profile.yaml \\
         --data "data/MetroPT3(AirCompressor).csv" --speed 100 --from 2020-07-14T12:00:00 --to 2020-07-15T20:00:00
@@ -203,7 +204,7 @@ def step_wait(prev: Optional[datetime], ts: datetime, speed: float, max_wait: fl
 
 class OpcUaServerSim:
     """One variable per profile signal at the node ids of south.opcua.tags.
-    Needs asyncua (imported in start()); not run here."""
+    Needs asyncua (imported in start()); tests/test_south.py reads it with the south client."""
 
     def __init__(self, profile: dict, endpoint: Optional[str] = None):
         cfg = south_section(profile, "opcua")

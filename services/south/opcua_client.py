@@ -33,9 +33,10 @@ attributes -- raises WriteRefused before the asyncua object is touched
 account in PDM_SOUTH_OPCUA_USER, which should have Browse, Read and Subscribe
 rights only.
 
-``main()`` imports asyncua and paho-mqtt when it runs. Neither is installed
-where this was written, so main() has not been run; the mapper and the
-wrappers are tested in tests/test_south.py.
+``main()`` imports asyncua and paho-mqtt when it runs, and has not been run
+itself. The mapper and the wrappers are tested in tests/test_south.py; with
+asyncua installed, the client and its handler also read the simulated plant's
+OPC UA server there (test_csv_through_a_live_opcua_server_matches_the_replayer).
 
     python services/south/opcua_client.py --profile profiles/metropt3_apu/asset_profile.yaml
 """
@@ -334,7 +335,8 @@ async def run(mapper: OpcUaMapper, send: Callable[[Out], None], *, endpoint: Opt
               username: Optional[str] = None, password: Optional[str] = None, queue: int = 10,
               sampling_ms: Optional[float] = None) -> None:
     """Connect as the read-only user, subscribe to every mapped node and feed the
-    mapper until SIGINT or SIGTERM; then flush. Not run here (no asyncua)."""
+    mapper until SIGINT or SIGTERM; then flush. The tests drive the client and the handler
+    directly, not this loop."""
     from asyncua import Client
 
     raw = Client(url=endpoint or mapper.endpoint)

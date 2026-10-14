@@ -263,16 +263,16 @@ runs only where `protobuf` is installed.
 
 ## Not verified here
 
-- Nothing here has talked to a broker, an OPC UA server or Node-RED:
-  paho-mqtt and asyncua are not installed where this was written. The
-  `main()` functions of the three modules (except the simulator's
-  `--dry-run`), the OPC UA server in `scada_sim.py` and the Node-RED flow have
-  not been run.
-- The asyncua calls (`set_user`/`set_password`, `create_subscription`,
-  `subscribe_data_change(queuesize=, sampling_interval=)`, the fields of the
-  data-change notification, `register_namespace`, `add_folder`,
-  `add_variable`, `write_value` with a `DataValue` carrying `SourceTimestamp`)
-  are written for asyncua 1.x from its documentation, not from a run.
+- Nothing here has talked to a broker or Node-RED. The `main()` functions of
+  the three modules (except the simulator's `--dry-run`) and the Node-RED flow
+  have not been run.
+- The OPC UA path has run against asyncua 2.1.0:
+  `test_csv_through_a_live_opcua_server_matches_the_replayer` starts the
+  simulator's OPC UA server, subscribes with the read-only client and its
+  handler (`create_subscription`, `subscribe_data_change(queuesize=,
+  sampling_interval=)`, the data-change fields, `write_value` with a
+  `SourceTimestamp`), and gets the replayer's records. The login
+  (`set_user`/`set_password`) has not run, and asyncua 1.x has not been tried.
 - The codec matches Google's protobuf runtime on the Sparkplug B subset it
   implements; it has not been tried against Eclipse Tahu or a real edge node.
 - The broker ACL and the OPC UA read-only user are proposals; nothing
