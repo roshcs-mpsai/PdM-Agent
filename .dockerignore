@@ -43,6 +43,8 @@ mosquitto/certs
 **/*.p12
 **/*.pfx
 **/*.jks
+# except public root certificates for a TLS-inspecting network (docker/ca/README.md)
+!docker/ca/*.crt
 
 # local compose overrides
 compose.override.yaml

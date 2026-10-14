@@ -28,3 +28,6 @@ build/
 # broker secrets (R3): password hashes and TLS keys, from tools/broker_users.py and tools/make_certs.sh
 mosquitto/config/passwd
 mosquitto/certs/
+
+# extra root certificates for a TLS-inspecting company network (docker/ca/README.md): local only
+docker/ca/*.crt

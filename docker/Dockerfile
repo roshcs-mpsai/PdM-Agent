@@ -21,6 +21,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Extra trusted root certificates, for a network that inspects HTTPS (a company proxy re-signs
+# every connection, and pip then fails with CERTIFICATE_VERIFY_FAILED). PEM files in docker/ca/
+# (*.crt, git-ignored; docker/ca/README.md says how to export them) are added to the system bundle,
+# and pip, requests, httpx and OpenSSL all read that bundle. With none there, nothing changes.
+COPY docker/ca/ /tmp/extra-ca/
+RUN cat /etc/ssl/certs/ca-certificates.crt $(find /tmp/extra-ca -name '*.crt') > /etc/ssl/certs/pdm-ca-bundle.crt \
+    && rm -rf /tmp/extra-ca
+ENV SSL_CERT_FILE=/etc/ssl/certs/pdm-ca-bundle.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/pdm-ca-bundle.crt \
+    PIP_CERT=/etc/ssl/certs/pdm-ca-bundle.crt
+
 # Dependencies first, so that a change to the code does not reinstall them. The dashboard's
 # requirements (streamlit) come in too: one image serves every service.
 COPY requirements.txt ./requirements.txt

@@ -244,6 +244,7 @@ over OPC UA. `tools/verify_local.sh --journey-a` runs the same steps, approving 
 | detector or prognostics refuses to start: the freeze does not match | the profile, events, features or a bundle changed, often line endings from a Windows checkout | `git status`; check out again with LF line endings |
 | a service logs `broker refused the connection: Not authorized` | secure broker, and its password is missing or `passwd` is stale | `python tools/broker_users.py --check`, then `docker compose restart mosquitto` |
 | mosquitto will not start: a bind source does not exist | secure broker without `passwd` or `mosquitto/certs` | step 2 of first-time setup |
+| build stops at `pip install` with `CERTIFICATE_VERIFY_FAILED` | a company network inspecting HTTPS | export its root certificate into `docker/ca/` (docker/ca/README.md), build again |
 | replayer: no such file under `data/` | the dataset is missing | step 3 |
 | no incident after the replay | too little look-back, or the detector refused windows | `docker compose logs detector gate`; replay from 2020-07-07 (Journey A, step 1) |
 | work orders blocked | no approval, a changed text, or the endpoint refused | the connector's log names the reason; `GET /work-orders` has `last_error` (services/connector/README.md) |
