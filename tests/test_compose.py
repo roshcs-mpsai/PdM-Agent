@@ -731,5 +731,6 @@ def test_docker_compose_config_accepts_both_files(tmp_path):
     for files in ((COMPOSE,), (COMPOSE, SECURE)):
         proc = config(env_file, *files)
         assert proc.returncode == 0, proc.stderr
-    missing = config(empty, COMPOSE)               # a fresh clone with no .env stops at once, naming each one
-    assert missing.returncode != 0 and all(f"required variable {v} " in missing.stderr for v in REQUIRED)
+    missing = config(empty, COMPOSE)               # a fresh clone with no .env stops at once, naming what is missing
+    named = re.findall(r"required variable (\w+) is missing", missing.stderr)
+    assert missing.returncode != 0 and named and set(named) <= set(REQUIRED)   # some versions name only the first

@@ -82,8 +82,8 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"     # one fresh val
 
 Every token is at least 32 characters and different from the others, or the api will not start
 (docs/SECURITY.md). The api sees only the token variables listed under `x-api-tokens` in
-`compose.yaml`; a token for another person needs a line there. `docker compose` stops at once,
-naming each variable, when a required one is missing.
+`compose.yaml`; a token for another person needs a line there. `docker compose` stops at once
+when a required one is missing, naming it (some Compose versions name only the first).
 
 ### 2. Broker accounts and certificates (the secure broker)
 
