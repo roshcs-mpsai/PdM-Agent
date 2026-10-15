@@ -12,3 +12,22 @@ venv/
 mlruns/
 .pytest_cache/
 .DS_Store
+
+# runtime output: quarantine, replay logs, fitted Version Zero models, harness output
+runs/
+models/
+eval/out/
+
+# pip install -e lib
+*.egg-info/
+build/
+
+# secrets (database and API passwords arrive in R1a.3)
+.env
+
+# broker secrets (R3): password hashes and TLS keys, from tools/broker_users.py and tools/make_certs.sh
+mosquitto/config/passwd
+mosquitto/certs/
+
+# extra root certificates for a TLS-inspecting company network (docker/ca/README.md): local only
+docker/ca/*.crt

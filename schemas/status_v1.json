@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdm-agent.local/schemas/status_v1.json",
+  "title": "status_v1",
+  "description": "An asset's NE 107 status with its causes, retained (INC-07, INT-03).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "status_v1"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "ne107": {
+      "enum": [
+        "good",
+        "maintenance_required",
+        "out_of_specification",
+        "function_check",
+        "failure"
+      ]
+    },
+    "causes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "score": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "threshold": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "alert": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "detector_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "incident_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "incident_state": {
+      "enum": [
+        null,
+        "open",
+        "diagnosing",
+        "awaiting_review",
+        "approved",
+        "rejected",
+        "sent",
+        "closed"
+      ]
+    },
+    "episode_open": {
+      "type": "boolean"
+    },
+    "prognosis": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "profile_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema",
+    "asset",
+    "ts",
+    "ne107",
+    "causes"
+  ],
+  "additionalProperties": false
+}

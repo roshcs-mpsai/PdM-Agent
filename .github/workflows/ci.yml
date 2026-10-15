@@ -1,3 +1,7 @@
+# CI (build plan T35; NFR-08): the secret scan, the test suite and the harness Version Zero on
+# Python 3.10 and 3.11. Nothing here needs Docker, a broker, the dataset or an API key: the tests
+# that need the dataset (data/, git-ignored) or a broker (PDM_TEST_BROKER) skip themselves.
+# tests/test_compose.py checks compose.yaml and the image files without starting anything.
 name: ci
 
 on:
@@ -5,14 +9,30 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - run: pytest -q
-      - run: python eval/evaluate.py
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Secret scan (every tracked file, rules in .gitleaks.toml)
+        run: python tools/secret_scan.py
+      - name: Install the requirements
+        run: pip install -r requirements.txt
+      - name: Install the shared library
+        run: pip install -e lib
+      - name: Tests
+        run: pytest -q
+      - name: Harness Version Zero
+        run: python eval/evaluate.py

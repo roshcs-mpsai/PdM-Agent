@@ -1,0 +1,90 @@
+# The secure broker (R3, NFR-06): accounts, per-service ACLs and TLS, as docs/SECURITY.md
+# describes. It goes on top of compose.yaml:
+#
+#   python tools/broker_users.py            # broker passwords into .env, hashes into mosquitto/config/passwd
+#   tools/make_certs.sh                     # local CA and broker certificate in mosquitto/certs/
+#   python tools/broker_users.py --check
+#   echo 'COMPOSE_FILE=compose.yaml:mosquitto/compose.secure.yaml' >> .env   # every docker compose command uses both
+#   docker compose up -d --wait
+#
+# Paths are relative to the project directory (where compose.yaml is), not to this file.
+# What changes against compose.yaml:
+#   - the broker loads mosquitto.secure.conf: no anonymous clients, the ACL, persistence;
+#   - the host reaches it on 8883 with TLS only (127.0.0.1 unless PDM_BROKER_BIND is set);
+#     1883 stays on the compose networks, where the services connect, accounts and ACLs applied;
+#   - every service that talks to the broker logs in with its own account, and nothing else
+#     (docs/SECURITY.md: no container gets the whole .env). A missing password stops
+#     docker compose before anything starts.
+# "!override" (Compose 2.24.4 or later) replaces compose.yaml's port list instead of adding to it.
+
+services:
+  mosquitto:
+    ports: !override
+      - "${PDM_BROKER_BIND:-127.0.0.1}:8883:8883"
+    environment:
+      PDM_MQTT_PASSWORD_HEALTHCHECK: ${PDM_MQTT_PASSWORD_HEALTHCHECK:?run python tools/broker_users.py}
+    volumes:
+      # Read-only, as the image's entrypoint would otherwise change their owner on the host.
+      # passwd and the certificates use the long syntax, so that compose stops when they are
+      # missing instead of creating empty directories in their place.
+      - ./mosquitto/config/mosquitto.secure.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/config/acl:/mosquitto/config/acl:ro
+      - {type: bind, source: ./mosquitto/config/passwd, target: /mosquitto/config/passwd, read_only: true}
+      - {type: bind, source: ./mosquitto/certs, target: /mosquitto/certs, read_only: true}
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      # logs in as "healthcheck" over TLS, so an expired or wrong certificate shows up too
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/certs/ca.crt -u healthcheck -P \"$$PDM_MQTT_PASSWORD_HEALTHCHECK\" -t '$$SYS/broker/version' -C 1 -W 3 > /dev/null"]
+
+  replayer:
+    environment:
+      PDM_MQTT_USER: replayer
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_REPLAYER:?run python tools/broker_users.py}
+
+  ingest:
+    environment:
+      PDM_MQTT_USER: ingest
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_INGEST:?run python tools/broker_users.py}
+
+  detector:
+    environment:
+      PDM_MQTT_USER: detector
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_DETECTOR:?run python tools/broker_users.py}
+
+  gate:
+    environment:
+      PDM_MQTT_USER: gate
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_GATE:?run python tools/broker_users.py}
+
+  prognostics:
+    environment:
+      PDM_MQTT_USER: prognostics
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_PROGNOSTICS:?run python tools/broker_users.py}
+
+  drift:
+    environment:
+      PDM_MQTT_USER: drift
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_DRIFT:?run python tools/broker_users.py}
+
+  agent:
+    environment:
+      PDM_MQTT_USER: agent
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_AGENT:?run python tools/broker_users.py}
+
+  opcua_north:
+    environment:
+      PDM_MQTT_USER: opcua_north
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_OPCUA_NORTH:?run python tools/broker_users.py}
+
+  south:
+    environment:
+      PDM_MQTT_USER: south
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_SOUTH:?run python tools/broker_users.py}
+
+  scada-sim:
+    environment:
+      PDM_MQTT_USER: scada_sim
+      PDM_MQTT_PASSWORD: ${PDM_MQTT_PASSWORD_SCADA_SIM:?run python tools/broker_users.py}
+
+volumes:
+  mosquitto-data: {}

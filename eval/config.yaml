@@ -1,0 +1,31 @@
+# eval/config.yaml -- the Week-7 freeze (T30; PR-09, DET-08)
+# Written by tools/freeze.py; edit only through it. eval/evaluate.py --frozen, the detector
+# service and the prognostics service load exactly these bundles and refuse anything else.
+# run_id fields are filled when tools/register_bundle.py registers each bundle in MLflow:
+#   python tools/register_bundle.py eval/frozen/<asset>/detector --name pdm-detector-<asset> --alias production
+#   python tools/register_bundle.py eval/frozen/<asset>/survival --name pdm-survival-<asset> --experiment prognostics
+# evaluation_lock: eval/promote.py refuses to move a production alias while it is on (OPS-07).
+frozen:
+  frozen_on: '2026-10-10'
+  asset: metropt3_apu
+  detector:
+    bundle: eval/frozen/metropt3_apu/detector/bundle.json
+    bundle_sha256: 719cb063654a66ddac6a35a274e7cdf87c9128771d34160b524569e7d3e771c2
+    run_id: null
+    detector: PCA
+    threshold:
+      kind: spot
+      value: 5.262356611432426
+  survival:
+    bundle: eval/frozen/metropt3_apu/survival/bundle.json
+    bundle_sha256: 013fd292d5c9f05d81741d20137c301d5cda15e105de73020505be22d5934980
+    run_id: null
+    model: logistic
+  events_sha256: 815bde6280b11ce4dba280256dc6e4317fcebb7923d25bd1578972da0d0833f2
+  profile_detector_sha256: 6b82923a9c9df2a39378e2feeb25c74fe80add731c42cb6784f8146d5bcdd9cb
+  features_sha256: a34df7a1c8adc70560d5a51caf7a9da207536b7c7a95f1faace940cf61cf0bd6
+  windows_key: dbc70407da5491e1
+  source_sha256: db30ccb4ea402e3c8bf2c99db06e288d4f2a772f6928f9dbe26a920d69793e24
+evaluation_lock:
+  locked: true
+  until: '2026-11-22'

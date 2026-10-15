@@ -7,3 +7,27 @@ pyyaml
 pydantic>=2
 paho-mqtt>=2
 pytest
+# R1: the evaluation harness and the candidate detectors (eval/)
+scikit-learn>=1.5
+scipy>=1.11
+# R1: the model registry (tools/register_bundle.py); the tests skip the MLflow round trip without it
+mlflow>=2.14
+# R2: the store (pdm_common.store); without it everything runs on SQLite
+psycopg[binary]>=3.2
+# R2: southbound OPC UA client and the northbound OPC UA server (services/south, services/opcua_north);
+# their asyncua tests are skipped without it
+asyncua>=1.1,<3
+# R2: the MCP tool server and the agent's MCP client (services/mcp_server, services/agent)
+mcp>=2.2
+# R2: HTTP services (the API, the work-order simulator) and their test client
+starlette>=0.37
+uvicorn>=0.30
+httpx>=0.27
+# G8 stretch: the read-only CIP client (services/south/cip.py); its tests use a fake driver
+pycomm3>=1.2
+# T17/T24: JSON Schema validation (pdm_common.schemas) and, for live traces, the OpenTelemetry SDK
+# (pdm_common.tracing is a no-op without it)
+jsonschema>=4
+opentelemetry-api>=1.25
+opentelemetry-sdk>=1.25
+opentelemetry-exporter-otlp-proto-http>=1.25

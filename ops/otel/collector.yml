@@ -1,0 +1,42 @@
+# OpenTelemetry collector (OPS-03, R3.5; T26): OTLP in, Jaeger out.
+# The agent and the MCP server send spans over OTLP/HTTP to otel-collector:4318
+# (pdm_common.tracing.configure); gRPC on 4317 is open too. Spans go on to Jaeger
+# over OTLP gRPC (Jaeger 1.35 and later accept OTLP natively).
+# Written for the contrib image (otel/opentelemetry-collector-contrib), which has
+# the health_check extension. Not run in the build sandbox: check with
+# `otelcol-contrib validate --config=collector.yml`.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317      # recent collectors bind to localhost unless told otherwise
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:                   # first in the pipeline: refuse data before the container runs out of memory
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  batch:
+    timeout: 2s
+    send_batch_size: 512
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true                # inside the compose core network
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger]

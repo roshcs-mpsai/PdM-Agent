@@ -1,0 +1,228 @@
+[
+    {
+        "id": "7a1c0f3e9b2d4e01",
+        "type": "tab",
+        "label": "PdM-Agent SCADA test bed",
+        "disabled": false,
+        "info": "Simulated plant for the PdM-Agent Sparkplug B adapter (services/south). Not run: see services/south/nodered/README.md. Needs node-red-contrib-mqtt-sparkplug-plus. Group, edge node and device must match the profile's south.sparkplug (pdm_testbed / scada_sim / apu)."
+    },
+    {
+        "id": "7a1c0f3e9b2d4e02",
+        "type": "comment",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "CSV slice -> Sparkplug B DDATA (edge node scada_sim, device apu, group pdm_testbed)",
+        "info": "Simulated plant for the PdM-Agent Sparkplug B adapter (services/south). Not run: see services/south/nodered/README.md. Needs node-red-contrib-mqtt-sparkplug-plus. Group, edge node and device must match the profile's south.sparkplug (pdm_testbed / scada_sim / apu).",
+        "x": 400,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "7a1c0f3e9b2d4e03",
+        "type": "inject",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "replay CSV slice",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 140,
+        "y": 100,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e04"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e04",
+        "type": "file in",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "read /data/replay.csv",
+        "filename": "/data/replay.csv",
+        "filenameType": "str",
+        "format": "utf8",
+        "chunk": false,
+        "sendError": false,
+        "encoding": "none",
+        "allProps": false,
+        "x": 340,
+        "y": 100,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e05"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e05",
+        "type": "csv",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "one message per row",
+        "sep": ",",
+        "hdrin": true,
+        "hdrout": "none",
+        "multi": "one",
+        "ret": "\\n",
+        "temp": "",
+        "skip": "0",
+        "strings": true,
+        "include_empty_strings": "",
+        "include_null_values": "",
+        "x": 550,
+        "y": 100,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e06"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e06",
+        "type": "function",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "row to Sparkplug metrics",
+        "func": "// One CSV row (from the csv node) -> one DDATA for the \"mqtt sparkplug device\" node.\n// Every column except the index and the timestamp becomes a metric named\n// PREFIX + column, which is how the proposed south.sparkplug.metrics names\n// them (APU/<signal>). All metrics are Doubles. The first row also carries\n// the metric definitions, which makes the device node publish its DBIRTH.\nconst PREFIX = env.get(\"PDM_METRIC_PREFIX\") || \"APU/\";\nconst SKIP = [\"\", \"col1\", \"Unnamed: 0\", \"timestamp\"];\nconst row = msg.payload;\nconst ts = Date.parse(String(row.timestamp).trim().replace(\" \", \"T\") + \"Z\");   // the CSV is in UTC\nif (Number.isNaN(ts)) {\n    node.warn(\"row without a readable timestamp: \" + JSON.stringify(row));\n    return null;\n}\nconst metrics = [];\nconst definition = {};\nfor (const [column, value] of Object.entries(row)) {\n    if (SKIP.includes(column)) continue;\n    const number = Number(value);\n    if (!Number.isFinite(number)) {\n        node.warn(\"column \" + column + \" is not a number: \" + value);\n        return null;\n    }\n    metrics.push({ name: PREFIX + column, value: number, timestamp: ts });\n    definition[PREFIX + column] = { dataType: \"Double\" };\n}\nconst out = { payload: { metrics: metrics } };\nif (!context.get(\"defined\")) {\n    out.definition = definition;\n    context.set(\"defined\", true);\n}\nreturn out;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 770,
+        "y": 100,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e07"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e07",
+        "type": "delay",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "10 rows/s (about 100x)",
+        "pauseType": "rate",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "10",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 990,
+        "y": 100,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e08"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e08",
+        "type": "mqtt sparkplug device",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "apu",
+        "metrics": {},
+        "broker": "7a1c0f3e9b2d4e0b",
+        "birthImmediately": false,
+        "bufferDevice": false,
+        "x": 1190,
+        "y": 160,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e09"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e09",
+        "type": "debug",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "commands received (none expected from PdM-Agent)",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1450,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "7a1c0f3e9b2d4e0a",
+        "type": "inject",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "set one value (edit the column)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"column\":\"\",\"value\":0}",
+        "payloadType": "json",
+        "x": 170,
+        "y": 220,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e0c"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e0c",
+        "type": "function",
+        "z": "7a1c0f3e9b2d4e01",
+        "name": "one column by hand",
+        "func": "// Set one value by hand (build guide R2b.7: a value set in Node-RED reaches\n// ingest). Put a CSV column and a value in the inject node, for example\n// {\"column\": \"<a CSV column>\", \"value\": 9.5}. Run the replay first: it\n// defines the metrics (DBIRTH). The adapter keeps every other signal's last\n// value, so this one change becomes a whole telemetry record.\nconst PREFIX = env.get(\"PDM_METRIC_PREFIX\") || \"APU/\";\nconst column = msg.payload && msg.payload.column;\nconst value = Number(msg.payload && msg.payload.value);\nif (!column || !Number.isFinite(value)) {\n    node.warn('set the payload to {\"column\": \"<a CSV column>\", \"value\": <number>}');\n    return null;\n}\nreturn { payload: { metrics: [{ name: PREFIX + column, value: value, timestamp: Date.now() }] } };\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 220,
+        "wires": [
+            [
+                "7a1c0f3e9b2d4e08"
+            ]
+        ]
+    },
+    {
+        "id": "7a1c0f3e9b2d4e0b",
+        "type": "mqtt-sparkplug-broker",
+        "name": "local broker (pdm_testbed / scada_sim)",
+        "deviceGroup": "pdm_testbed",
+        "eonName": "scada_sim",
+        "broker": "localhost",
+        "port": "1883",
+        "tls": "",
+        "clientid": "",
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "enableStoreForward": false,
+        "primaryScada": ""
+    }
+]

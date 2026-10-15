@@ -1,0 +1,188 @@
+{
+  "R-ab12cd34-1": {
+    "schema": "tool_result_v1",
+    "result_id": "R-ab12cd34-1",
+    "incident_id": "INC-example-20260101T0000Z",
+    "tool": "incident_context",
+    "arguments": {
+      "incident_id": "INC-example-20260101T0000Z"
+    },
+    "as_of": "2026-01-01T00:00:00Z",
+    "output": {
+      "incident": {
+        "incident_id": "INC-example-20260101T0000Z",
+        "asset": "example",
+        "as_of": "2026-01-01T00:00:00Z",
+        "cause": "gate passed: 30 of 30 windows over the threshold in the last 30min",
+        "detector_run_id": "bundle-0123456789ab"
+      },
+      "ne107": {
+        "status": "maintenance_required",
+        "causes": [
+          "incident open, diagnosis pending"
+        ]
+      },
+      "prognosis": {
+        "schema": "prognosis_v1",
+        "asset": "example",
+        "ts": "2026-01-01T00:00:00Z",
+        "horizons": {
+          "24": {
+            "p": 0.05,
+            "lower": 0.01,
+            "upper": 0.12
+          },
+          "72": {
+            "p": 0.11,
+            "lower": 0.03,
+            "upper": 0.24
+          },
+          "168": {
+            "p": 0.2,
+            "lower": 0.07,
+            "upper": 0.38
+          }
+        },
+        "interval": 0.9,
+        "inputs": {
+          "score_max_24h": 41.2,
+          "load_share_6h": 0.86
+        },
+        "constant_hazard": {
+          "24": 0.04,
+          "72": 0.11,
+          "168": 0.23
+        },
+        "skill": {
+          "brier_skill_by_horizon": {
+            "24": -0.03,
+            "72": -0.08,
+            "168": -0.13
+          },
+          "mean": -0.08,
+          "bar": 0.15,
+          "meets_bar": false
+        },
+        "model_run_id": "survival-example"
+      }
+    }
+  },
+  "R-ab12cd34-2": {
+    "schema": "tool_result_v1",
+    "result_id": "R-ab12cd34-2",
+    "incident_id": "INC-example-20260101T0000Z",
+    "tool": "run_check",
+    "arguments": {
+      "incident_id": "INC-example-20260101T0000Z",
+      "checks": []
+    },
+    "as_of": "2026-01-01T00:00:00Z",
+    "output": {
+      "results": [
+        {
+          "id": "C2",
+          "check": "data_quality.restart",
+          "kind": "data_quality",
+          "result": "pass",
+          "measured": "data resumed 3.2 h before the alarm, after 9.1 h without data",
+          "value": 192.0,
+          "threshold": 55.0,
+          "unit": "min",
+          "rule": "",
+          "points_to": "a start-up transient"
+        },
+        {
+          "id": "C4",
+          "check": "continuous_load_signature",
+          "kind": "fault_signature",
+          "result": "fail",
+          "measured": "motor has run without a rest for 2.41 h (healthy 99th percentile 0.19 h)",
+          "value": 2.41,
+          "threshold": 0.1889,
+          "unit": "h",
+          "rule": "",
+          "points_to": "failure in progress"
+        },
+        {
+          "id": "C6",
+          "check": "oil_temperature_high",
+          "kind": "fault_signature",
+          "result": "fail",
+          "measured": "oil at 78.4 degC in the opening window (healthy 99th percentile 70.8)",
+          "value": 78.43,
+          "threshold": 70.85,
+          "unit": "degC",
+          "rule": "",
+          "points_to": "thermal stress under continuous load"
+        },
+        {
+          "id": "C7",
+          "check": "lps_activity",
+          "kind": "fault_signature",
+          "result": "pass",
+          "measured": "low-pressure switch active for 3 min in the past 24 h (healthy 99th percentile 28 min)",
+          "value": 3.0,
+          "threshold": 28.0,
+          "unit": "min",
+          "rule": "",
+          "points_to": "low-pressure episodes"
+        }
+      ]
+    }
+  },
+  "R-ab12cd34-3": {
+    "schema": "tool_result_v1",
+    "result_id": "R-ab12cd34-3",
+    "incident_id": "INC-example-20260101T0000Z",
+    "tool": "attribute_anomaly",
+    "arguments": {
+      "incident_id": "INC-example-20260101T0000Z"
+    },
+    "as_of": "2026-01-01T00:00:00Z",
+    "output": {
+      "window_end": "2026-01-01T00:00:00Z",
+      "score": 41.2,
+      "threshold": 12.5,
+      "top": [
+        [
+          "hours_since_rest",
+          0.41
+        ],
+        [
+          "load_share_6h",
+          0.22
+        ],
+        [
+          "oil_mean",
+          0.12
+        ]
+      ],
+      "imputed": []
+    }
+  },
+  "R-ab12cd34-4": {
+    "schema": "tool_result_v1",
+    "result_id": "R-ab12cd34-4",
+    "incident_id": "INC-example-20260101T0000Z",
+    "tool": "get_telemetry",
+    "arguments": {
+      "incident_id": "INC-example-20260101T0000Z",
+      "signals": [
+        "motor_current"
+      ]
+    },
+    "as_of": "2026-01-01T00:00:00Z",
+    "output": {
+      "signals": {
+        "motor_current": {
+          "unit": "A",
+          "min": 5.52,
+          "max": 5.81,
+          "mean": 5.63
+        }
+      },
+      "start": "2025-12-31T21:00:00Z",
+      "end": "2026-01-01T00:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# corpus files are verified by SHA-256 (corpus/register.yaml): keep their bytes as committed
+corpus/** -text

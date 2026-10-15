@@ -1,0 +1,198 @@
+# features.yaml -- v0.2 (2026-10-10, Rosh)
+# Every per-window feature the pipeline computes: its name, its kind and the parameters
+# the kind reads. pdm_common.features computes them from this file, so the shared code
+# names no channel: a kind reads a *role* (motor_current, panel_pressure, ...) and the
+# `roles:` block below maps each role to one of this asset's signals.
+# v0.1 (Oct 4): the declaration generated from the EDA v4 feature dictionary.
+# v0.2 (Oct 10): kinds, parameters and roles added so pdm_common.features can compute
+#   the same 42 features the EDA v4 notebook (Section 8.1) saved; the output must match
+#   data/processed_v4/windows_10min.csv.gz within 1e-6 (tests/test_features.py).
+#
+# role column: summary statistic | engineered | state | leak | data-quality flag
+# detector_v1: one of the 21 inputs the frozen detector (PCA v1) reads
+# drop_for_tabular: the EDA v4 redundancy pass (|r| >= 0.9 on healthy windows)
+
+schema_version: "0.2"
+asset: metropt3_apu
+window: {length: 10min, stride: 1min, grid_step: 10s}
+
+roles:                          # what each feature kind reads, per asset
+  motor_current: Motor_current
+  panel_pressure: TP3
+  oil_temperature: Oil_temperature
+  low_pressure_switch: LPS
+  load_command: DV_eletric
+
+summary:                        # five statistics of each detector input over the window
+  inputs: [TP2, TP3, H1, Oil_temperature, Motor_current]
+  stats: [mean, std, min, max, slope]   # slope = last point minus first point
+
+features:
+  - name: TP2_mean
+    compute: {kind: summary, signal: TP2, stat: mean}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP2: mean over the window"
+  - name: TP2_std
+    compute: {kind: summary, signal: TP2, stat: std}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: true}
+    desc: "TP2: standard deviation over the window"
+  - name: TP2_min
+    compute: {kind: summary, signal: TP2, stat: min}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP2: minimum over the window"
+  - name: TP2_max
+    compute: {kind: summary, signal: TP2, stat: max}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "TP2: maximum over the window"
+  - name: TP2_slope
+    compute: {kind: summary, signal: TP2, stat: slope}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP2: last point minus first point of the window"
+  - name: TP3_mean
+    compute: {kind: summary, signal: TP3, stat: mean}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP3: mean over the window"
+  - name: TP3_std
+    compute: {kind: summary, signal: TP3, stat: std}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP3: standard deviation over the window"
+  - name: TP3_min
+    compute: {kind: summary, signal: TP3, stat: min}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP3: minimum over the window"
+  - name: TP3_max
+    compute: {kind: summary, signal: TP3, stat: max}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP3: maximum over the window"
+  - name: TP3_slope
+    compute: {kind: summary, signal: TP3, stat: slope}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "TP3: last point minus first point of the window"
+  - name: H1_mean
+    compute: {kind: summary, signal: H1, stat: mean}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "H1: mean over the window"
+  - name: H1_std
+    compute: {kind: summary, signal: H1, stat: std}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "H1: standard deviation over the window"
+  - name: H1_min
+    compute: {kind: summary, signal: H1, stat: min}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "H1: minimum over the window"
+  - name: H1_max
+    compute: {kind: summary, signal: H1, stat: max}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "H1: maximum over the window"
+  - name: H1_slope
+    compute: {kind: summary, signal: H1, stat: slope}
+    meta: {role: "summary statistic", unit: "bar", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "H1: last point minus first point of the window"
+  - name: Oil_temperature_mean
+    compute: {kind: summary, signal: Oil_temperature, stat: mean}
+    meta: {role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "Oil_temperature: mean over the window"
+  - name: Oil_temperature_std
+    compute: {kind: summary, signal: Oil_temperature, stat: std}
+    meta: {role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "Oil_temperature: standard deviation over the window"
+  - name: Oil_temperature_min
+    compute: {kind: summary, signal: Oil_temperature, stat: min}
+    meta: {role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "Oil_temperature: minimum over the window"
+  - name: Oil_temperature_max
+    compute: {kind: summary, signal: Oil_temperature, stat: max}
+    meta: {role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "Oil_temperature: maximum over the window"
+  - name: Oil_temperature_slope
+    compute: {kind: summary, signal: Oil_temperature, stat: slope}
+    meta: {role: "summary statistic", unit: "degC", look_back: "10 min", detector_v1: false, drop_for_tabular: true}
+    desc: "Oil_temperature: last point minus first point of the window"
+  - name: Motor_current_mean
+    compute: {kind: summary, signal: Motor_current, stat: mean}
+    meta: {role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "Motor_current: mean over the window"
+  - name: Motor_current_std
+    compute: {kind: summary, signal: Motor_current, stat: std}
+    meta: {role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "Motor_current: standard deviation over the window"
+  - name: Motor_current_min
+    compute: {kind: summary, signal: Motor_current, stat: min}
+    meta: {role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "Motor_current: minimum over the window"
+  - name: Motor_current_max
+    compute: {kind: summary, signal: Motor_current, stat: max}
+    meta: {role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "Motor_current: maximum over the window"
+  - name: Motor_current_slope
+    compute: {kind: summary, signal: Motor_current, stat: slope}
+    meta: {role: "summary statistic", unit: "A", look_back: "10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "Motor_current: last point minus first point of the window"
+  - name: load_share_6h
+    compute: {kind: share_of_time, role: motor_current, above: 4.5, window: 6h, min_data: 1h}
+    meta: {role: "engineered", unit: "share", look_back: "6 h", detector_v1: true, drop_for_tabular: false}
+    desc: "share of the trailing 6 h with Motor_current > 4.5 A (an hour of the 6 h must have data)"
+  - name: rest_share_6h
+    compute: {kind: share_of_time, role: motor_current, below: 1.0, window: 6h, min_data: 1h}
+    meta: {role: "engineered", unit: "share", look_back: "6 h", detector_v1: false, drop_for_tabular: true}
+    desc: "share of the trailing 6 h with Motor_current < 1 A (same coverage rule)"
+  - name: hours_since_rest
+    compute: {kind: hours_since_below, role: motor_current, below: 1.0, stop_gap: 30min}
+    meta: {role: "engineered", unit: "h", look_back: "unbounded", detector_v1: true, drop_for_tabular: false}
+    desc: "hours since Motor_current was last below 1 A; a data gap or freeze of 30 min or more counts as a stop, a rest inside a shorter gap is missed"
+  - name: tp3_deficit_7d
+    compute: {kind: deficit_vs_median, role: panel_pressure, baseline: 7d, min_coverage: 0.25}
+    meta: {role: "engineered", unit: "bar", look_back: "7 days", detector_v1: true, drop_for_tabular: false}
+    desc: "window mean of TP3 minus the median of per-minute TP3 over the 7 days before the window (scored with at least a quarter of those days present)"
+  - name: oil_rise_1h
+    compute: {kind: rise, role: oil_temperature, lag: 1h}
+    meta: {role: "engineered", unit: "degC", look_back: "1 h 10 min", detector_v1: true, drop_for_tabular: false}
+    desc: "window mean of Oil_temperature minus the same an hour earlier"
+  - name: share_coverage_6h
+    compute: {kind: coverage, window: 6h}
+    meta: {role: "state", unit: "share", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "share of the trailing 6 h grid points that hold data"
+  - name: minutes_since_data_resumed
+    compute: {kind: minutes_since_resume, stop_gap: 30min, horizon: 6h}
+    meta: {role: "state", unit: "min", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "minutes since data resumed after a missing run of 30 min or more, capped at 360"
+  - name: gap_hours
+    compute: {kind: gap_hours, stop_gap: 30min, horizon: 6h, cap_hours: 48}
+    meta: {role: "state", unit: "h", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "length of that missing run, 0 when it ended more than 6 h ago, capped at 48"
+  - name: panel_pressure_at_resume
+    compute: {kind: value_at_resume, role: panel_pressure, stop_gap: 30min, horizon: 6h}
+    meta: {role: "state", unit: "bar", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "TP3 at the first point with data after that run; missing beyond 6 h"
+  - name: oil_at_resume
+    compute: {kind: value_at_resume, role: oil_temperature, stop_gap: 30min, horizon: 6h}
+    meta: {role: "state", unit: "degC", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "Oil_temperature at the first point with data after that run; missing beyond 6 h"
+  - name: refill_rate_6h
+    compute: {kind: refill_rate, role: panel_pressure, loaded_above: 4.5, below: 9.5, window: 6h, min_minutes: 5}
+    meta: {role: "leak", unit: "bar/min", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "mean TP3 rise per minute over steps with the motor loaded below 9.5 bar in the trailing 6 h (5 min of such steps needed)"
+  - name: idle_loss_6h
+    compute: {kind: idle_loss, role: panel_pressure, loaded_above: 4.5, window: 6h, min_minutes: 60}
+    meta: {role: "leak", unit: "bar/h", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "mean TP3 fall per hour over steps with the motor not loaded in the trailing 6 h (60 min of such steps needed)"
+  - name: load_share_trend
+    compute: {kind: share_trend, of: load_share_6h, role: motor_current, above: 4.5, window: 7d, min_coverage: 0.25}
+    meta: {role: "leak", unit: "share", look_back: "7 days", detector_v1: false, drop_for_tabular: false}
+    desc: "load_share_6h minus the share of the trailing 7 days with Motor_current > 4.5 A (a quarter of the week needed)"
+  - name: lps_minutes_24h
+    compute: {kind: minutes_active, role: low_pressure_switch, window: 24h}
+    meta: {role: "leak", unit: "min", look_back: "24 h", detector_v1: false, drop_for_tabular: false}
+    desc: "minutes with LPS = 1 in the trailing 24 h"
+  - name: gap_leak_down
+    compute: {kind: gap_loss_rate, role: panel_pressure, stop_gap: 30min, horizon: 6h}
+    meta: {role: "leak", unit: "bar/h", look_back: "6 h", detector_v1: false, drop_for_tabular: false}
+    desc: "TP3 lost per hour across the last missing run of 30 min or more, when it ended within the past 6 h; missing otherwise"
+  - name: cmd_motor_off
+    compute: {kind: command_without_motion, role: load_command, motor_below: 1.0}
+    meta: {role: "data-quality flag", unit: "count", look_back: "10 min", detector_v1: false, drop_for_tabular: false}
+    desc: "points with DV_eletric = 1 while Motor_current < 1 A (load commanded, motor off)"
+  - name: n_bridged
+    compute: {kind: bridged_points}
+    meta: {role: "data-quality flag", unit: "count", look_back: "10 min", detector_v1: false, drop_for_tabular: false}
+    desc: "bridged points in the window"

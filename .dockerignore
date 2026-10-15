@@ -1,0 +1,51 @@
+# What stays out of the image (docker/Dockerfile; build plan T35): the dataset and everything
+# derived from it, runtime output, notebooks, local environments, and every secret. The replayer
+# gets data/ as a read-only mount; secrets reach the containers from .env at run time.
+# tests/test_compose.py checks a list of paths against these patterns.
+
+# version control, caches, local environments
+.git
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.ipynb_checkpoints
+**/.DS_Store
+.venv
+venv
+**/*.egg-info
+build
+
+# the dataset, runtime output and notebooks
+data
+runs
+models
+mlruns
+mlruns.db
+eval/out
+notebooks
+**/*.csv
+**/*.csv.gz
+**/*.zip
+**/*.npz
+**/*.parquet
+
+# secrets: .env (the template stays), the broker's password file, keys and certificates
+.env
+.env.*
+!.env.example
+mosquitto/config/passwd
+mosquitto/certs
+**/*.key
+**/*.pem
+**/*.crt
+**/*.der
+**/*.p12
+**/*.pfx
+**/*.jks
+# except public root certificates for a TLS-inspecting network (docker/ca/README.md)
+!docker/ca/*.crt
+
+# local compose overrides
+compose.override.yaml
+compose.override.yml

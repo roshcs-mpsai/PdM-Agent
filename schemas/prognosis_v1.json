@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdm-agent.local/schemas/prognosis_v1.json",
+  "title": "prognosis_v1",
+  "description": "P(failure within each horizon) with its interval, every stream hour (PRG-01 to PRG-06).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "prognosis_v1"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "horizons": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/horizon"
+      },
+      "minProperties": 1
+    },
+    "interval": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "number",
+          "null"
+        ]
+      }
+    },
+    "windows_in_history": {
+      "type": "integer"
+    },
+    "input_from": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "input_to": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "attribution": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "log_odds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "input",
+          "log_odds"
+        ]
+      }
+    },
+    "constant_hazard": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "skill": {
+      "type": "object",
+      "properties": {
+        "brier_skill_by_horizon": {
+          "type": "object"
+        },
+        "mean": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bar": {
+          "type": "number"
+        },
+        "meets_bar": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bar",
+        "meets_bar"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "model_run_id": {
+      "type": "string"
+    },
+    "profile_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema",
+    "asset",
+    "ts",
+    "horizons",
+    "interval",
+    "inputs",
+    "model_run_id",
+    "skill"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "horizon": {
+      "type": "object",
+      "properties": {
+        "p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "lower": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "upper": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "p",
+        "lower",
+        "upper"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

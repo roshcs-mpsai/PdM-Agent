@@ -1,16 +1,468 @@
-# Walking skeleton — R0. Services are added here as they come up:
-# replayer -> ingest/scorer -> dashboard (see the construction plan).
-services:
+# PdM-Agent: the whole stack on one host (FRD section 12; build plan T35).
+# docs/RUNBOOK.md is the guide: first-time setup, Journey A, where to look, backups.
+#
+#   cp .env.example .env                    # then fill it in (docs/RUNBOOK.md, first-time setup)
+#   docker compose up -d --build --wait     # every long-running service, healthy
+#   docker compose run --rm replayer        # one-shot job: the F4 lead-up at 1000x (profile "replay")
+#   docker compose down                     # stop and remove the containers; the volumes stay
+#
+# Networks (FRD section 12, NFR-06):
+#   core    internal. The broker, the store, the stream services, the agent and its tools, the
+#           monitoring. No route off the host, and Docker publishes no port of a container that
+#           sits on internal networks only.
+#   south   the plant side: the broker, the south adapter, the simulated SCADA.
+#   north   the operator- and SCADA-facing endpoints: api and dashboard (tokens), the work-order
+#           endpoint the connector posts to (token), opcua_north. opcua_north runs the anonymous
+#           demo endpoint, so its port stays on 127.0.0.1 (docs/RUNBOOK.md, known limits).
+#   egress  the agent alone: the one network with a route to the language-model API.
+#   ops     not in the FRD table: MLflow, Prometheus, Grafana, Jaeger and the collector's OTLP
+#           ports, published on 127.0.0.1 only. They need a network that is not internal for
+#           their ports to be published (build guide R3.3).
+# south, north and ops are ordinary bridges, so their ports can be published, with IP
+# masquerading off: a container on them cannot open a connection off the host.
+#
+# Published ports bind to 127.0.0.1. PDM_NORTH_BIND=0.0.0.0 in .env opens the api, the dashboard
+# and the work-order simulator to the LAN. The /metrics ports (pdm_common.metrics.PORTS, scraped by
+# ops/prometheus/prometheus.yml) are not published; Prometheus reaches them on core.
+#
+# Secrets come from .env by reference (${VAR}); none is written in this file, and no container
+# gets the whole .env. The broker here is the R0 development broker (anonymous, 127.0.0.1:1883).
+# The secure broker (accounts, ACLs, TLS on 8883, docs/SECURITY.md) is this file plus
+# mosquitto/compose.secure.yaml: COMPOSE_FILE=compose.yaml:mosquitto/compose.secure.yaml in .env.
+#
+# Images are pinned to tags. NFR-05 asks for digests; pin them on the demo host (docs/RUNBOOK.md),
+# they could not be looked up where this file was written. tests/test_compose.py checks this file.
+
+name: pdm-agent
+
+x-logging: &logging                  # bounded container logs, for the 72 h soak (NFR-04)
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-healthcheck: &healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 60s
+
+x-python: &python                    # every service built from docker/Dockerfile
+  image: pdm-agent:local
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s             # ingest flushes its windows and writes its reconciliation
+  logging: *logging
+
+x-runtime: &runtime                  # every Python service
+  PDM_LOG_LEVEL: ${PDM_LOG_LEVEL:-INFO}
+  PDM_METRICS_HOST: 0.0.0.0          # /metrics and /health on the service's PORTS port, for Prometheus
+
+x-broker: &broker                    # pdm_common.broker; mosquitto/compose.secure.yaml adds the accounts
+  PDM_MQTT_HOST: mosquitto
+  PDM_MQTT_PORT: "1883"              # plain MQTT inside the stack; TLS on 8883 is for the host and the LAN
+
+x-store: &store
+  PDM_STORE: postgresql://pdm:${PG_PASSWORD}@postgres:5432/pdm
+
+x-tracing: &tracing
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+
+x-api-tokens: &api-tokens            # who the api lets in (docs/SECURITY.md); empty ones are ignored
+  PDM_TOKEN_REVIEWER: ${PDM_TOKEN_REVIEWER:-}
+  PDM_TOKEN_REVIEWER_ROSH: ${PDM_TOKEN_REVIEWER_ROSH:-}
+  PDM_TOKEN_REVIEWER_ASHOK: ${PDM_TOKEN_REVIEWER_ASHOK:-}
+  PDM_TOKEN_REVIEWER_GAYATRI: ${PDM_TOKEN_REVIEWER_GAYATRI:-}
+  PDM_TOKEN_ENGINEER: ${PDM_TOKEN_ENGINEER:-}
+  PDM_TOKEN_OPERATOR: ${PDM_TOKEN_OPERATOR:-}
+  PDM_TOKEN_EVALUATOR: ${PDM_TOKEN_EVALUATOR:-}
+  PDM_TOKEN_AGENT: ${PDM_TOKEN_AGENT:?set PDM_TOKEN_AGENT in .env}
+
+x-on-broker: &on-broker
   mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: pdm-mosquitto
+    condition: service_healthy
+
+x-on-store: &on-store
+  postgres:
+    condition: service_healthy
+
+# For the programs that serve no /health (replayer, scada-sim): healthy while the process
+# holds an established TCP connection to the broker port (1883 is 075B in /proc/net/tcp).
+x-broker-connected: &broker-connected
+  <<: *healthcheck
+  test: ["CMD", "python", "-c", "import sys; rows = [l.split() for l in open('/proc/net/tcp').read().splitlines()[1:]]; sys.exit(0 if any(r[2].endswith(':075B') and r[3] == '01' for r in rows) else 1)"]
+
+services:
+
+  # --- platform --------------------------------------------------------------------------------
+
+  mosquitto:                         # R0 development broker; the secure one: mosquitto/compose.secure.yaml
+    image: eclipse-mosquitto:2.0.20
+    restart: unless-stopped
     ports:
-      - "1883:1883"
+      - "127.0.0.1:1883:1883"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks: [core, south]
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-W", "3"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      <<: *healthcheck
+      start_period: 10s
+      test: ["CMD", "mosquitto_sub", "-h", "127.0.0.1", "-p", "1883", "-t", "$$SYS/#", "-C", "1", "-W", "3"]
+    logging: *logging
+
+  postgres:                          # the store (FRD section 8); db/init runs once, on a new volume
+    image: timescale/timescaledb:2.17.2-pg16
     restart: unless-stopped
+    environment:
+      POSTGRES_DB: pdm
+      POSTGRES_USER: pdm
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env (see .env.example)}
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # the file, not the folder: the image's own init scripts (extension, telemetry, tuning) stay
+      - ./db/init/001_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    networks: [core]
+    healthcheck:
+      <<: *healthcheck
+      start_period: 30s
+      test: ["CMD-SHELL", "pg_isready -U pdm -d pdm"]
+    logging: *logging
+
+  mlflow:                            # the model registry (T29, OPS-05); SQLite backend in its volume
+    image: ghcr.io/mlflow/mlflow:v2.16.2
+    restart: unless-stopped
+    command: >-
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - mlflow:/mlflow
+    networks: [core, ops]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3)"]
+    logging: *logging
+
+  # --- the stream: replayer -> ingest -> detector -> gate, with prognostics and drift ----------
+
+  # One-shot job: docker compose run --rm replayer [--speed N --from ISO --to ISO]. Arguments given
+  # there replace all of `command` (the replayer's own default speed is 1, real time).
+  replayer:
+    <<: *python
+    profiles: [replay]
+    restart: "no"                    # it ends with the replay; unless-stopped would replay again
+    entrypoint: [python, services/replayer/replayer.py, --profile, profiles/metropt3_apu/asset_profile.yaml,
+                 --data, "data/MetroPT3(AirCompressor).csv"]
+    command: [--speed, "1000", --from, "2020-07-14T00:00:00", --to, "2020-07-15T20:00:00"]   # F4 lead-up (README)
+    environment:
+      <<: [*runtime, *broker]
+    volumes:
+      - ./data:/app/data:ro          # the dataset, read-only; it is never in the image
+      - runs:/app/runs               # the replay manifest
+    networks: [core]
+    depends_on: *on-broker
+    healthcheck: *broker-connected
+
+  ingest:
+    <<: *python
+    command: [python, services/ingest/ingest.py, --profile, profiles/metropt3_apu/asset_profile.yaml]
+    environment:
+      <<: [*runtime, *broker, *store]
+      PDM_CATALOGUE: runs/catalogue.jsonl    # the data-catalogue line written at shutdown (ING-13)
+    volumes:
+      - runs:/app/runs               # quarantine.jsonl and reconciliation.jsonl per asset
+    networks: [core]
+    depends_on:
+      <<: [*on-broker, *on-store]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/health', timeout=3)"]
+
+  detector:
+    <<: *python
+    command: [python, services/detector/detector.py, --profile, profiles/metropt3_apu/asset_profile.yaml]
+    environment:
+      <<: [*runtime, *broker, *store]
+    networks: [core]
+    depends_on:
+      <<: [*on-broker, *on-store]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9102/health', timeout=3)"]
+
+  gate:
+    <<: *python
+    command: [python, services/gate/gate.py, --profile, profiles/metropt3_apu/asset_profile.yaml]
+    environment:
+      <<: [*runtime, *broker, *store]
+    networks: [core]
+    depends_on:
+      <<: [*on-broker, *on-store]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9103/health', timeout=3)"]
+
+  prognostics:
+    <<: *python
+    command: [python, services/prognostics/prognosis.py, --profile, profiles/metropt3_apu/asset_profile.yaml]
+    environment:
+      <<: [*runtime, *broker, *store]
+    networks: [core]
+    depends_on:
+      <<: [*on-broker, *on-store]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9104/health', timeout=3)"]
+
+  drift:
+    <<: *python
+    command: [python, services/drift/drift.py, --profile, profiles/metropt3_apu/asset_profile.yaml]
+    environment:
+      <<: [*runtime, *broker, *store]
+    volumes:
+      - runs:/app/runs               # candidate requests (OPS-06)
+    networks: [core]
+    depends_on:
+      <<: [*on-broker, *on-store]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9110/health', timeout=3)"]
+
+  # --- diagnosis and review ----------------------------------------------------------------------
+
+  mcp_server:                        # the agent's six read-only tools over MCP, streamable HTTP at /mcp
+    <<: *python
+    command: [python, services/mcp_server/server.py, --profile, profiles/metropt3_apu/asset_profile.yaml,
+              --host, 0.0.0.0, --port, "8765"]
+    environment:
+      <<: [*runtime, *store, *tracing]
+      PDM_TOKEN_AGENT: ${PDM_TOKEN_AGENT:?set PDM_TOKEN_AGENT in .env}   # every MCP request must carry it
+    networks: [core]
+    depends_on: *on-store
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import socket, urllib.request; urllib.request.urlopen('http://127.0.0.1:9105/health', timeout=3); socket.create_connection(('127.0.0.1', 8765), 3).close()"]
+
+  agent:                             # writes only through the api; reads only through the tools
+    <<: *python
+    # PDM_AGENT_ARGS in .env adds arguments. Without an API key:
+    #   PDM_AGENT_ARGS="--policy rules"       (the triage skill's rules as code, eval/policy.py)
+    #   PDM_AGENT_ARGS="--scripted services/agent/scripts/dry_run.json"   (a fixed script)
+    command: >-
+      python services/agent/agent.py --profile profiles/metropt3_apu/asset_profile.yaml
+      --api http://api:8000 --tools http://mcp_server:8765/mcp ${PDM_AGENT_ARGS:-}
+    environment:
+      <<: [*runtime, *broker, *tracing]
+      PDM_TOKEN_AGENT: ${PDM_TOKEN_AGENT:?set PDM_TOKEN_AGENT in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    networks: [core, egress]
+    depends_on:
+      <<: *on-broker
+      api:
+        condition: service_healthy
+      mcp_server:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9106/health', timeout=3)"]
+
+  api:                               # the one way into the store for people and the agent; /metrics also on 9107
+    <<: *python
+    command: [python, services/api/main.py, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      <<: [*runtime, *store, *api-tokens]
+      PDM_STUDY_SALT: ${PDM_STUDY_SALT:-}   # the study endpoints (T34) answer 503 until it is set
+    ports:
+      - "${PDM_NORTH_BIND:-127.0.0.1}:8000:8000"
+    networks: [core, north]
+    depends_on: *on-store
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+
+  dashboard:                         # reads and decides through the api; each reviewer signs in with a token
+    <<: *python
+    command: [streamlit, run, services/dashboard/app.py, --server.address=0.0.0.0, --server.port=8501,
+              --server.headless=true, --browser.gatherUsageStats=false]
+    environment:
+      <<: *runtime
+      PDM_API_URL: http://api:8000
+    ports:
+      - "${PDM_NORTH_BIND:-127.0.0.1}:8501:8501"
+    networks: [north]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+
+  # --- integration -----------------------------------------------------------------------------
+
+  opcua_north:                       # read-only OPC UA for SCADA: opc.tcp://<host>:4840/pdm/
+    <<: *python
+    command: [python, services/opcua_north/server.py, --profile, profiles/metropt3_apu/asset_profile.yaml,
+              --anonymous]           # the demo endpoint; the secure one needs a certificate (docs/RUNBOOK.md)
+    environment:
+      <<: [*runtime, *broker]
+    ports:
+      - "127.0.0.1:4840:4840"        # anonymous, so never on the LAN by default
+    networks: [core, north]
+    depends_on: *on-broker
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import socket, urllib.request; urllib.request.urlopen('http://127.0.0.1:9109/health', timeout=3); socket.create_connection(('127.0.0.1', 4840), 3).close()"]
+
+  connector:                         # approved work orders to the maintenance system, nothing inbound
+    <<: *python
+    command: [python, services/connector/connector.py]
+    environment:
+      <<: [*runtime, *store]
+      PDM_WORKORDER_URL: http://workorder-sim:8088/api/work-orders
+      PDM_TOKEN_CONNECTOR: ${PDM_TOKEN_CONNECTOR:?set PDM_TOKEN_CONNECTOR in .env}
+    networks: [core, north]
+    depends_on: *on-store
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9108/health', timeout=3)"]
+
+  south:                             # Sparkplug B adapter: plant metrics in, telemetry out, no write path
+    <<: *python
+    command: [python, services/south/sparkplug.py, --profile, profiles/metropt3_apu/asset_profile.yaml]
+    environment:
+      <<: [*runtime, *broker]
+    networks: [south, core]
+    depends_on: *on-broker
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9111/health', timeout=3)"]
+
+  # --- test bed: the simulated plant and maintenance system ------------------------------------
+
+  scada-sim:                         # one-shot job, profile "scada": the CSV as Sparkplug B for the south adapter
+    <<: *python
+    profiles: [scada]
+    restart: "no"
+    entrypoint: [python, services/south/scada_sim.py, --profile, profiles/metropt3_apu/asset_profile.yaml,
+                 --data, "data/MetroPT3(AirCompressor).csv"]
+    command: [--speed, "100", --qos, "1", --from, "2020-07-14T12:00:00", --to, "2020-07-15T20:00:00"]
+    environment:
+      <<: [*runtime, *broker]
+    volumes:
+      - ./data:/app/data:ro
+    networks: [south]
+    depends_on:
+      <<: *on-broker
+      south:
+        condition: service_healthy   # the adapter must be listening before the births
+    healthcheck: *broker-connected
+
+  workorder-sim:                     # the maintenance system's REST endpoint, simulated (tools/workorder_sim.py)
+    <<: *python
+    command: [python, tools/workorder_sim.py, --host, 0.0.0.0, --port, "8088", --store, runs/workorder_sim.json]
+    environment:
+      <<: *runtime
+      WORKORDER_SIM_TOKEN: ${PDM_TOKEN_CONNECTOR:?set PDM_TOKEN_CONNECTOR in .env}   # the token it accepts
+    ports:
+      - "${PDM_NORTH_BIND:-127.0.0.1}:8088:8088"
+    volumes:
+      - workorder-sim:/app/runs      # the orders received, kept across restarts
+    networks: [north]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=3)"]
+
+  # --- observability (ops/README.md) --------------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    volumes:
+      - ./ops/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [core, ops]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [core, ops]
+    depends_on:
+      prometheus:
+        condition: service_started
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+    logging: *logging
+
+  # The collector image has no shell and no HTTP client, so there is no container health check;
+  # its own endpoint (:13133 on core) is checked by tools/verify_local.sh.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/collector.yml"]
+    volumes:
+      - ./ops/otel/collector.yml:/etc/otelcol-contrib/collector.yml:ro
+    ports:
+      - "127.0.0.1:4317:4317"        # OTLP gRPC, for programs on the host
+      - "127.0.0.1:4318:4318"        # OTLP HTTP
+    networks: [core, ops]
+    depends_on:
+      jaeger:
+        condition: service_started
+    logging: *logging
+
+  jaeger:                            # traces in memory: lost on a restart; agent_traces is the record
+    image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "50000"
+    ports:
+      - "127.0.0.1:16686:16686"      # the UI
+    networks: [core, ops]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/go/bin/all-in-one-linux", "status"]   # the image has no shell; this asks :14269
+    logging: *logging
+
+volumes:
+  pgdata: {}
+  mlflow: {}
+  runs: {}
+  workorder-sim: {}
+  prometheus-data: {}
+
+networks:
+  core:
+    internal: true
+  south:
+    driver_opts: &no-masquerade
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+  north:
+    driver_opts: *no-masquerade
+  ops:
+    driver_opts: *no-masquerade
+  egress: {}

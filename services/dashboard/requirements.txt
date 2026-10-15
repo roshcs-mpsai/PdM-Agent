@@ -1,0 +1,6 @@
+# Dashboard only; the services and tests do not need it.
+#   pip install -e lib -r services/dashboard/requirements.txt
+# pandas comes with streamlit; pdm_common (lib/) gives the NE 107 markers and the approved text of a work order.
+streamlit>=1.37
+plotly>=5.18
+httpx>=0.27

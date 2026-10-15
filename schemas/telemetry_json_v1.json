@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdm-agent.local/schemas/telemetry_json_v1.json",
+  "title": "telemetry_json_v1",
+  "description": "One telemetry record, as the replayer and the southbound adapters publish it (ING-01). Signal names come from the asset profile; ingest checks them against it.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "telemetry_json_v1"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts": {
+      "type": "string",
+      "description": "source timestamp, ISO 8601; without an offset it is read in the profile's source_timezone"
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      },
+      "minProperties": 1
+    }
+  },
+  "required": [
+    "schema",
+    "asset",
+    "seq",
+    "ts",
+    "signals"
+  ],
+  "additionalProperties": false
+}

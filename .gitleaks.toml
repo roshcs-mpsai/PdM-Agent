@@ -1,0 +1,127 @@
+# Secret rules for this repository (R3, NFR-06; docs/SECURITY.md).
+#
+# gitleaks reads this file (gitleaks git . / gitleaks dir . pick it up from the repository
+# root). tools/secret_scan.py reads it too and applies the [[rules]] and the [allowlist]
+# below to the files git tracks, so the same check runs where the gitleaks binary is not
+# installed: CI and the pre-commit hook.
+#
+# Every regex has to work in Go's RE2 (gitleaks) and in Python's re (the scanner): no
+# look-arounds or back-references, and (?i) only at the very start of a pattern. The
+# secret of a finding is capture group "secretGroup" when a rule sets one, else the whole
+# match; the allowlist regexes and stopwords are tested against that secret.
+# In the NAME=value rules a value starting with $ < { or ? is a reference, not a secret:
+# ${VAR}, $VAR, <token>, and compose's ${VAR:?message}. ${VAR:-default} is still caught.
+# A value ends at a backslash, so "PG_PASSWORD=change-me\n" in source code reads as change-me.
+# A false positive on one line: add a "gitleaks:allow" comment to that line.
+
+title = "PdM-Agent secret rules"
+
+[extend]
+# gitleaks adds its built-in rules (cloud keys, GitHub tokens, ...). tools/secret_scan.py
+# applies only the rules in this file.
+useDefault = true
+
+[[rules]]
+id = "mosquitto-password-hash"
+description = "Mosquitto password file entry ($7$ PBKDF2-SHA512, $6$ SHA-512 or argon2id)"
+regex = '''\$(?:7\$[0-9]{1,9}|6)\$(?:[A-Za-z0-9+/]{16}|[A-Za-z0-9+/]{86}==)\$[A-Za-z0-9+/]{86}==|\$argon2id\$v=[0-9]+\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]{11,}={0,2}\$[A-Za-z0-9+/]{16,}={0,2}'''
+keywords = ["$7$", "$6$", "$argon2id$"]
+tags = ["mqtt", "password"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''\bsk-ant-[A-Za-z0-9_-]{24,}'''
+keywords = ["sk-ant-"]
+tags = ["api-key"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key (project, service account, admin or legacy format)"
+regex = '''\bsk-(?:(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}|[A-Za-z0-9]{48}\b)'''
+keywords = ["sk-"]
+tags = ["api-key"]
+
+[[rules]]
+id = "mlflow-tracking-credential"
+description = "MLflow tracking server token or password with its value"
+regex = '''(?i)\bMLFLOW_TRACKING_(?:TOKEN|PASSWORD)["']?\s*[=:]\s*["']?([^\s"'#$<{?\\][^\s"'#\\]{3,})'''
+secretGroup = 1
+keywords = ["mlflow_tracking_"]
+tags = ["mlflow"]
+
+[[rules]]
+id = "databricks-token"
+description = "Databricks personal access token (MLflow tracking on Databricks)"
+regex = '''\bdapi[0-9a-f]{32}(?:-[0-9]+)?\b'''
+keywords = ["dapi"]
+tags = ["mlflow", "api-key"]
+
+[[rules]]
+id = "bearer-token"
+description = "Bearer token written out"
+regex = '''(?i)\bbearer\s+([A-Za-z0-9._~+/-]{20,}=*)'''
+secretGroup = 1
+keywords = ["bearer"]
+tags = ["token"]
+
+[[rules]]
+id = "secret-in-config"
+description = "Token, secret, API key or password with a value in a YAML, env, TOML, INI or conf file"
+regex = '''(?i)\b[A-Z0-9_.-]*(?:token|secret|api[_-]?key|passwd|password)["']?\s*[:=]\s*["']?([^\s"'#$<{?\\][^\s"'#\\]{7,})'''
+secretGroup = 1
+path = '''(?i)(?:^|/)(?:\.env(?:\.[A-Za-z0-9_-]+)?|[^/]*\.(?:ya?ml|env|toml|ini|cfg|conf|properties))$'''
+keywords = ["token", "secret", "key", "passw"]
+tags = ["token", "password"]
+
+[[rules]]
+id = "pdm-secret-variable"
+description = "A PDM_* password, token or secret variable with its value (as in .env)"
+regex = '''\bPDM_[A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET)[A-Z0-9_]*["']?\s*[=:]\s*["']?([^\s"'#$<{?\\][^\s"'#\\]{7,})'''
+secretGroup = 1
+keywords = ["pdm_"]
+tags = ["token", "password"]
+
+[[rules]]
+id = "postgres-password"
+description = "PostgreSQL password variable with a value other than the change-me placeholder"
+regex = '''\b(?:PG_?|POSTGRES_)PASSWORD["']?\s*[=:]\s*["']?([^\s"'#$<{?\\][^\s"'#\\]*)'''
+secretGroup = 1
+keywords = ["password"]
+tags = ["password"]
+
+[[rules]]
+id = "url-credentials"
+description = "Password inside a database or broker URL"
+regex = '''(?i)\b(?:postgres(?:ql)?(?:\+[a-z0-9]+)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mqtts?)://[^\s:/@"'<>]+:([^\s/@"'<>]+)@'''
+secretGroup = 1
+keywords = ["://"]
+tags = ["password"]
+
+[[rules]]
+id = "private-key"
+description = "Private key in PEM form"
+regex = '''-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----'''
+keywords = ["private key"]
+tags = ["key"]
+
+[[rules]]
+id = "secret-file"
+description = "A file that only holds secrets: .env, the broker password file, a private key or keystore"
+path = '''(?:^|/)(?:\.env|mosquitto/config/passwd|[^/]+\.(?:key|p12|pfx|jks))$'''
+tags = ["file"]
+
+[allowlist]
+description = "Placeholders wherever they appear, and the test fixtures"
+paths = [
+  '''(?:^|/)tests/fixtures/''',
+]
+regexes = [
+  '''(?i)^change-?me$''',       # the .env.example placeholder
+  '''^<[^>]*>$''',              # <password>, <token>
+  '''^\$\{''',                  # ${VAR}: compose and .env interpolation
+  '''^\$[A-Za-z_]''',           # $VAR in shell examples
+  '''^(?:\.{3}|\*{3,})$''',     # ... and ***
+  '''^-\}?$''',                 # an empty compose default, ${VAR:-}
+]
+stopwords = ["xxxxxx", "example", "placeholder", "redacted"]

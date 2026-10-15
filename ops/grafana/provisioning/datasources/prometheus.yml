@@ -1,0 +1,21 @@
+# Grafana data sources (R3.5; T24). Mount ops/grafana/provisioning at
+# /etc/grafana/provisioning. The dashboards refer to Prometheus by its uid.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: pdm-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 5s            # the scrape interval, so $__rate_interval is at least 20 s
+
+  - name: Jaeger                  # traces in Grafana's Explore; the Jaeger UI on :16686 shows the same
+    uid: pdm-jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false

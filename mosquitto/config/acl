@@ -1,0 +1,74 @@
+# Mosquitto ACL for PdM-Agent (R3, NFR-06): one account per service, least privilege.
+# Read by mosquitto.secure.conf. tools/broker_users.py takes the account names from the
+# "user" lines and keeps their passwords in .env; the hashes go to mosquitto/config/passwd.
+#
+# An account may do only what its lines grant: "read" receives messages on a topic,
+# "write" publishes to it. "+" is one level of the topic, here the asset id. There are no
+# rules before the first "user" line, so a client without an account gets nothing (and
+# allow_anonymous false refuses it anyway). No %u or %c patterns.
+#
+# Keep comments on their own lines: Mosquitto reads the rest of a "topic" line, a trailing
+# "#" included, as the topic. docs/SECURITY.md has this table in prose, and
+# tests/test_broker_security.py checks the file against what each service needs.
+
+# replayer: publishes the recorded dataset as telemetry
+user replayer
+topic write pdm/+/telemetry
+
+# south: the Sparkplug B and OPC UA adapters (services/south). Reads the plant and writes
+# telemetry. It cannot publish anything under spBv1.0/, so no NCMD, DCMD or STATE (ING-15).
+user south
+topic read spBv1.0/#
+topic write pdm/+/telemetry
+
+# scada_sim: the simulated plant of the test bed. A real site has no such account.
+user scada_sim
+topic write spBv1.0/#
+
+user ingest
+topic read pdm/+/telemetry
+topic write pdm/+/windows
+
+user detector
+topic read pdm/+/windows
+topic write pdm/+/scores
+
+user prognostics
+topic read pdm/+/windows
+topic read pdm/+/scores
+topic write pdm/+/prognosis
+
+user gate
+topic read pdm/+/scores
+topic read pdm/+/windows
+topic read pdm/+/prognosis
+topic read pdm/_sys/drift
+topic write pdm/+/incidents
+topic write pdm/+/status
+
+user drift
+topic read pdm/+/telemetry
+topic write pdm/_sys/drift
+
+user agent
+topic read pdm/+/incidents
+
+user opcua_north
+topic read pdm/+/scores
+topic read pdm/+/prognosis
+topic read pdm/+/status
+
+# south-cip: the read-only CIP device reader; services/south/cip.py runs as "south-cip"
+user south-cip
+topic write pdm/+/device
+
+user mcp_server
+topic read pdm/+/device
+
+# dashboard: the status view reads the retained status
+user dashboard
+topic read pdm/+/status
+
+# healthcheck: the compose health check reads one retained $SYS topic and nothing else
+user healthcheck
+topic read $SYS/broker/version
