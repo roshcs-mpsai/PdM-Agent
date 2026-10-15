@@ -219,3 +219,53 @@ def test_validation_does_not_change_the_brief():
     before = copy.deepcopy(b)
     validate_brief(b, RESULTS)
     assert b == before
+
+
+# --- pdm_common installed outside the checkout (the Docker image) -----------------------------
+
+_FIND_DATA = (
+    "from pdm_common import schemas, corpus, skills\n"
+    "schemas.load_schema('brief_v1')\n"
+    "print(schemas.SCHEMA_DIR.parent, corpus.default_corpus_dir().parent, skills.REPO_ROOT, sep='|')\n"
+)
+
+
+def _installed_copy(tmp_path):
+    """pdm_common copied into a folder of its own, as ``pip install ./lib`` puts it in site-packages."""
+    import shutil
+    site = tmp_path / "site-packages"
+    shutil.copytree(ROOT / "lib" / "pdm_common", site / "pdm_common",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    return site
+
+
+def _run(site, cwd, env_root):
+    import os
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if k not in ("PDM_ROOT", "PDM_CORPUS", "PYTHONPATH")}
+    env["PYTHONPATH"] = str(site)
+    if env_root:
+        env["PDM_ROOT"] = str(env_root)
+    return subprocess.run([sys.executable, "-c", _FIND_DATA], cwd=cwd, env=env,
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_an_installed_copy_finds_the_data_through_pdm_root(tmp_path):
+    """The image's case: the package in site-packages, PDM_ROOT=/app (docker/Dockerfile)."""
+    site = _installed_copy(tmp_path)
+    out = _run(site, cwd=tmp_path, env_root=ROOT)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().split("|") == [str(ROOT)] * 3
+
+
+def test_an_installed_copy_finds_the_data_from_the_working_directory(tmp_path):
+    """Without PDM_ROOT, a service started in the repository root still finds schemas/."""
+    site = _installed_copy(tmp_path)
+    out = _run(site, cwd=ROOT, env_root=None)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().split("|") == [str(ROOT)] * 3
+
+
+def test_the_image_sets_pdm_root_to_its_workdir():
+    text = (ROOT / "docker" / "Dockerfile").read_text()
+    assert "PDM_ROOT=/app" in text and "WORKDIR /app" in text

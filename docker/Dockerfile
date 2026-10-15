@@ -14,8 +14,11 @@
 ARG PYTHON_IMAGE=python:3.11.13-slim-bookworm
 FROM ${PYTHON_IMAGE}
 
+# PDM_ROOT: pdm_common is installed into site-packages below, so it is told where the
+# repository's schemas/, corpus/ and skills/ are (lib/pdm_common/paths.py).
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PDM_ROOT=/app \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 

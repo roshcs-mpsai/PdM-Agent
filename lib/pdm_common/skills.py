@@ -33,7 +33,9 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from pdm_common.paths import repo_root
+
+REPO_ROOT = repo_root()
 SHARED_DIR = Path("skills") / "shared"
 SKILL_FILE = "SKILL.md"
 KINDS = ("shared", "asset")

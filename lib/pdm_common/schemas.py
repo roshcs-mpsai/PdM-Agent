@@ -14,7 +14,9 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"
+from pdm_common.paths import repo_root
+
+SCHEMA_DIR = repo_root() / "schemas"
 
 
 class SchemaError(ValueError):

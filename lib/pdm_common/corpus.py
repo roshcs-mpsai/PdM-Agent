@@ -47,6 +47,7 @@ from typing import Iterable
 import yaml
 
 from pdm_common.hashing import sha256_file
+from pdm_common.paths import repo_root
 
 REGISTER_FILE = "register.yaml"
 DOC_DIRS = ("docs", "injection")         # every file under these must be in the register
@@ -82,9 +83,9 @@ class CorpusError(RuntimeError):
 
 
 def default_corpus_dir() -> Path:
-    """``$PDM_CORPUS``, else corpus/ at the repository root (pdm_common installed with ``pip install -e lib``)."""
+    """``$PDM_CORPUS``, else corpus/ at the repository root (pdm_common.paths.repo_root)."""
     env = os.environ.get("PDM_CORPUS")
-    return Path(env) if env else Path(__file__).resolve().parents[2] / "corpus"
+    return Path(env) if env else repo_root() / "corpus"
 
 
 # --- sanitising (AGT-09) -----------------------------------------------------------------------

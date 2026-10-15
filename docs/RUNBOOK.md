@@ -246,6 +246,7 @@ over OPC UA. `tools/verify_local.sh --journey-a` runs the same steps, approving 
 | mosquitto will not start: a bind source does not exist | secure broker without `passwd` or `mosquitto/certs` | step 2 of first-time setup |
 | build stops at `pip install` with `CERTIFICATE_VERIFY_FAILED` | a company network inspecting HTTPS | export its root certificate into `docker/ca/` (docker/ca/README.md), build again |
 | replayer: no such file under `data/` | the dataset is missing | step 3 |
+| incidents stay open; the agent logs `no schema brief_v1 in /usr/local/lib/python3.11/schemas` | an image built before Oct 14: the installed `pdm_common` looked for `schemas/` next to itself | pull, `docker compose build`, `docker compose up -d --wait`; the image now sets `PDM_ROOT=/app` |
 | no incident after the replay | too little look-back, or the detector refused windows | `docker compose logs detector gate`; replay from 2020-07-07 (Journey A, step 1) |
 | work orders blocked | no approval, a changed text, or the endpoint refused | the connector's log names the reason; `GET /work-orders` has `last_error` (services/connector/README.md) |
 | `south` unhealthy | the adapter holds no broker connection | `docker compose logs south` |
